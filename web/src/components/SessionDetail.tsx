@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
-import { Send, Pencil, Check, X, Copy, Terminal as TerminalIcon, CheckCircle, ChevronLeft, ChevronUp, ChevronDown, CornerDownLeft, XCircle, History, FileText, Loader2 } from "lucide-react";
-import { getSession, sendInput, getSessionNames, setSessionName, captureHistory, generateRecap } from "@/lib/api";
+import { Send, Pencil, Check, X, Copy, Terminal as TerminalIcon, CheckCircle, ChevronLeft, ChevronUp, ChevronDown, CornerDownLeft, XCircle, History, FileText, Loader2, ImagePlus } from "lucide-react";
+import { getSession, sendInput, getSessionNames, setSessionName, captureHistory, generateRecap, uploadImage } from "@/lib/api";
 import type { SessionInfo } from "@/lib/types";
 
 import { Button } from "@/components/ui/button";
@@ -42,7 +42,10 @@ export default function SessionDetail({ sessionId, onBack }: SessionDetailProps)
   const [copied, setCopied] = useState(false);
   const [capturingHistory, setCapturingHistory] = useState(false);
   const [historyCopied, setHistoryCopied] = useState<"history" | "recap" | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageUploaded, setImageUploaded] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Capture and copy terminal history to clipboard
   const handleCaptureHistory = async (format: "plain" | "markdown") => {
@@ -73,6 +76,75 @@ export default function SessionDetail({ sessionId, onBack }: SessionDetailProps)
       setCapturingHistory(false);
     }
   };
+
+  // Handle image upload (from file picker or paste)
+  const handleImageUpload = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      setError("Only image files are supported");
+      return;
+    }
+
+    setUploadingImage(true);
+    try {
+      // Convert file to base64 data URL
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      // Upload to server
+      const result = await uploadImage(sessionId, dataUrl, file.name);
+
+      // Insert filepath into command input or send directly
+      if (command.trim()) {
+        // Append to existing command
+        setCommand((prev) => prev + " " + result.filepath);
+      } else {
+        // Send the filepath directly as input (for Claude Code)
+        await sendInput(sessionId, result.filepath + "\n");
+      }
+
+      setImageUploaded(true);
+      setTimeout(() => setImageUploaded(false), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to upload image");
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  // Handle file input change
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleImageUpload(file);
+    }
+    // Reset input so same file can be selected again
+    e.target.value = "";
+  };
+
+  // Handle paste event for images
+  const handlePaste = useCallback(
+    async (e: React.ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            await handleImageUpload(file);
+          }
+          return;
+        }
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sessionId, command]
+  );
 
   const fetchSession = useCallback(async () => {
     try {
@@ -502,6 +574,40 @@ export default function SessionDetail({ sessionId, onBack }: SessionDetailProps)
         </div>
 
         <div className="flex gap-2 md:gap-3">
+          {/* Hidden file input for image upload */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleFileInputChange}
+          />
+
+          {/* Image upload button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 flex-shrink-0"
+                disabled={session.status !== "running" || uploadingImage}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {uploadingImage ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : imageUploaded ? (
+                  <CheckCircle className="w-4 h-4 text-primary" />
+                ) : (
+                  <ImagePlus className="w-4 h-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {uploadingImage ? "Uploading..." : imageUploaded ? "Image uploaded!" : "Upload image (or paste)"}
+            </TooltipContent>
+          </Tooltip>
+
           <div className="flex-1 relative">
             <span className="absolute left-3 md:left-4 top-1/2 -translate-y-1/2 text-sm text-primary font-mono">
               &gt;
@@ -511,7 +617,14 @@ export default function SessionDetail({ sessionId, onBack }: SessionDetailProps)
               type="text"
               value={command}
               onChange={(e) => setCommand(e.target.value)}
-              placeholder="Type a command..."
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendCommand(e);
+                }
+              }}
+              onPaste={handlePaste}
+              placeholder="Type a command or paste an image..."
               className="pl-7 md:pl-8 font-mono bg-background/50 text-base md:text-sm"
               disabled={session.status !== "running"}
             />

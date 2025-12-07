@@ -19,7 +19,7 @@ import {
   Zap,
   Star,
   Clock,
-  FolderInput,
+  FileCode,
 } from "lucide-react";
 import {
   listSessions,
@@ -43,6 +43,8 @@ import {
   setSessionDescription,
   getFolderDescriptions,
   setFolderDescription,
+  getFolderDocFiles,
+  setFolderDocFile,
 } from "@/lib/api";
 import type { SessionInfo, SessionConfig, ActivityState } from "@/lib/types";
 import { getSessionId } from "@/lib/types";
@@ -51,7 +53,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -112,6 +113,7 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
   const [sessionFolders, setSessionFoldersState] = useState<Record<string, string>>({});
   const [folders, setFoldersState] = useState<string[]>([]);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+  const [localStorageLoaded, setLocalStorageLoaded] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
   const [newSessionConfig, setNewSessionConfig] = useState<SessionConfig>({
     command: "zsh",
@@ -131,13 +133,18 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
   const [folderDescriptions, setFolderDescriptionsState] = useState<Record<string, string>>({});
   const [editingDescription, setEditingDescription] = useState<{ type: "session" | "folder"; id: string } | null>(null);
   const [newDescription, setNewDescription] = useState("");
+  // Doc files state
+  const [folderDocFiles, setFolderDocFilesState] = useState<Record<string, string>>({});
+  const [editingDocFile, setEditingDocFile] = useState<string | null>(null);
+  const [newDocFile, setNewDocFile] = useState("");
 
-  // Load saved and recent directories, and descriptions
+  // Load saved and recent directories, descriptions, and doc files
   useEffect(() => {
     setSavedDirectoriesState(getSavedDirectories());
     setRecentDirectoriesState(getRecentDirectories());
     setSessionDescriptionsState(getSessionDescriptions());
     setFolderDescriptionsState(getFolderDescriptions());
+    setFolderDocFilesState(getFolderDocFiles());
   }, []);
 
   const fetchSessions = useCallback(async () => {
@@ -153,6 +160,7 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
   }, []);
 
   useEffect(() => {
+    // Load localStorage data on client side only
     setSessionNamesState(getSessionNames());
     setSessionFoldersState(getSessionFolders());
     setFoldersState(getFoldersList());
@@ -160,6 +168,7 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
     const storedKey = localStorage.getItem("terminalApiKey");
     setApiUrl(storedUrl || getDefaultApiUrl());
     setApiKey(storedKey ?? getDefaultApiKey());
+    setLocalStorageLoaded(true);
     fetchSessions();
 
     const interval = setInterval(fetchSessions, 2000);
@@ -248,6 +257,32 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
   const handleCancelDescription = () => {
     setEditingDescription(null);
     setNewDescription("");
+  };
+
+  // Doc file handlers
+  const handleEditDocFile = (folderName: string) => {
+    setNewDocFile(folderDocFiles[folderName] || "");
+    setEditingDocFile(folderName);
+  };
+
+  const handleSaveDocFile = () => {
+    if (!editingDocFile) return;
+    setFolderDocFile(editingDocFile, newDocFile);
+    setFolderDocFilesState(getFolderDocFiles());
+    setEditingDocFile(null);
+    setNewDocFile("");
+  };
+
+  const handleCancelDocFile = () => {
+    setEditingDocFile(null);
+    setNewDocFile("");
+  };
+
+  // Create terminal in folder handler
+  const handleCreateInFolder = async (folderName: string) => {
+    // Pre-set the folder for the new session dialog
+    setNewSessionFolder(folderName);
+    setShowNewSession(true);
   };
 
   const handleKill = async (id: string) => {
@@ -343,11 +378,17 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
+  // Sync localStorage data periodically to ensure consistency across devices/tabs
   useEffect(() => {
-    const syncNames = () => {
+    const syncLocalStorage = () => {
       setSessionNamesState(getSessionNames());
+      setSessionFoldersState(getSessionFolders());
+      setFoldersState(getFoldersList());
+      setSessionDescriptionsState(getSessionDescriptions());
+      setFolderDescriptionsState(getFolderDescriptions());
+      setFolderDocFilesState(getFolderDocFiles());
     };
-    const interval = setInterval(syncNames, 500);
+    const interval = setInterval(syncLocalStorage, 500);
     return () => clearInterval(interval);
   }, []);
 
@@ -499,6 +540,16 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
                 <Badge variant="secondary" className="text-xs px-1.5 py-0">
                   {folderSessions.length}
                 </Badge>
+                {folderDocFiles[folderName] && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="flex items-center">
+                        <FileCode className="w-3 h-3 text-muted-foreground" />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>{folderDocFiles[folderName]}</TooltipContent>
+                  </Tooltip>
+                )}
                 {hasIdleSessions && isCollapsed && (
                   <div className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_6px_var(--primary)]" />
                 )}
@@ -521,9 +572,18 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleCreateInFolder(folderName)}>
+                    <Plus className="w-3.5 h-3.5 mr-2" />
+                    New Terminal
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => handleEditDescription("folder", folderName)}>
                     <Pencil className="w-3.5 h-3.5 mr-2" />
                     {folderDescriptions[folderName] ? "Edit Description" : "Add Description"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleEditDocFile(folderName)}>
+                    <FileCode className="w-3.5 h-3.5 mr-2" />
+                    {folderDocFiles[folderName] ? "Edit Doc File" : "Set Doc File"}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -615,7 +675,7 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
 
       {/* Session List */}
       <ScrollArea className="flex-1 p-4">
-        {loading ? (
+        {loading || !localStorageLoaded ? (
           <div className="flex items-center justify-center h-32">
             <div className="w-5 h-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
           </div>
@@ -951,6 +1011,43 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
               Cancel
             </Button>
             <Button onClick={handleSaveDescription}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Doc File Edit Dialog */}
+      <Dialog open={editingDocFile !== null} onOpenChange={(open) => !open && handleCancelDocFile()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Documentation File</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                File Path
+              </label>
+              <Input
+                type="text"
+                value={newDocFile}
+                onChange={(e) => setNewDocFile(e.target.value)}
+                placeholder="/path/to/CLAUDE.md or README.md"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveDocFile();
+                  if (e.key === "Escape") handleCancelDocFile();
+                }}
+                autoFocus
+              />
+              <p className="text-xs text-muted-foreground">
+                Path to a documentation file (e.g., CLAUDE.md, README.md) that provides context for Claude Code.
+                This will be included when creating new terminals in this folder.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCancelDocFile}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveDocFile}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

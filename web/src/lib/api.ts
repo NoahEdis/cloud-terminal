@@ -352,3 +352,51 @@ export async function generateRecap(id: string): Promise<RecapResponse> {
   }
   return res.json();
 }
+
+// Image upload API - saves image to server and returns file path
+export interface ImageUploadResponse {
+  success: boolean;
+  filepath: string;
+  size: number;
+  type: string;
+}
+
+export async function uploadImage(
+  id: string,
+  image: string,
+  filename?: string
+): Promise<ImageUploadResponse> {
+  const res = await fetch(`${getApiUrl()}/api/sessions/${id}/upload-image`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ image, filename }),
+  });
+  if (!res.ok) {
+    if (res.status === 404) throw new Error("Session not found");
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// Folder documentation files storage
+const FOLDER_DOC_FILES_KEY = "terminal_folder_doc_files";
+
+export function getFolderDocFiles(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(localStorage.getItem(FOLDER_DOC_FILES_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+export function setFolderDocFile(folderName: string, docFile: string): void {
+  const docFiles = getFolderDocFiles();
+  if (docFile.trim()) {
+    docFiles[folderName] = docFile.trim();
+  } else {
+    delete docFiles[folderName];
+  }
+  localStorage.setItem(FOLDER_DOC_FILES_KEY, JSON.stringify(docFiles));
+}
