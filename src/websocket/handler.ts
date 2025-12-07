@@ -2,6 +2,9 @@ import type { WebSocket } from "ws";
 import { sessionManager } from "../session-manager.js";
 import type { ClientMessage } from "../types.js";
 
+// Heartbeat interval in milliseconds (25 seconds - under typical 30s timeout)
+const HEARTBEAT_INTERVAL = 25000;
+
 export function handleWebSocketConnection(ws: WebSocket, sessionId: string): void {
   // Add client to session
   const added = sessionManager.addClient(sessionId, ws);
@@ -12,8 +15,39 @@ export function handleWebSocketConnection(ws: WebSocket, sessionId: string): voi
     return;
   }
 
+  // Track if client is alive (responds to pings)
+  let isAlive = true;
+
+  // Send ping messages to keep connection alive
+  const heartbeatInterval = setInterval(() => {
+    if (!isAlive) {
+      // Client didn't respond to last ping, terminate connection
+      console.log(`[WebSocket] Client unresponsive for ${sessionId}, terminating`);
+      clearInterval(heartbeatInterval);
+      ws.terminate();
+      return;
+    }
+
+    isAlive = false;
+    // Send both WebSocket ping and application-level ping for compatibility
+    ws.ping();
+    try {
+      ws.send(JSON.stringify({ type: "ping", timestamp: Date.now() }));
+    } catch {
+      // Ignore send errors, connection will be cleaned up
+    }
+  }, HEARTBEAT_INTERVAL);
+
+  // Handle pong responses (WebSocket-level)
+  ws.on("pong", () => {
+    isAlive = true;
+  });
+
   // Handle incoming messages
   ws.on("message", (raw: Buffer) => {
+    // Any message from client means it's alive
+    isAlive = true;
+
     try {
       const message = JSON.parse(raw.toString()) as ClientMessage;
 
@@ -30,6 +64,11 @@ export function handleWebSocketConnection(ws: WebSocket, sessionId: string): voi
           }
           break;
 
+        case "pong":
+          // Application-level pong response
+          isAlive = true;
+          break;
+
         default:
           console.warn(`[WebSocket] Unknown message type from client`);
       }
@@ -40,11 +79,13 @@ export function handleWebSocketConnection(ws: WebSocket, sessionId: string): voi
 
   // Handle client disconnect
   ws.on("close", () => {
+    clearInterval(heartbeatInterval);
     sessionManager.removeClient(sessionId, ws);
   });
 
   ws.on("error", (err) => {
     console.error(`[WebSocket] Error:`, err);
+    clearInterval(heartbeatInterval);
     sessionManager.removeClient(sessionId, ws);
   });
 }

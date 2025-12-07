@@ -18,6 +18,11 @@ export interface TerminalHandle {
   scrollToBottom: () => void;
 }
 
+// Reconnection settings
+const MAX_RECONNECT_ATTEMPTS = 5;
+const INITIAL_RECONNECT_DELAY = 1000;
+const MAX_RECONNECT_DELAY = 30000;
+
 export default function Terminal({ sessionId, onExit, onError }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
@@ -30,6 +35,11 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
   const sessionIdRef = useRef<string>(sessionId);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const lastScrollCheckRef = useRef<number>(0);
+
+  // Reconnection state
+  const reconnectAttemptsRef = useRef<number>(0);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const intentionalCloseRef = useRef<boolean>(false);
 
   // Keep sessionId ref updated
   sessionIdRef.current = sessionId;
@@ -88,15 +98,40 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
     pollingRef.current = setInterval(poll, 100);
   }, [sessionId, onExit, stopPolling]);
 
+  // Calculate reconnection delay with exponential backoff
+  const getReconnectDelay = useCallback(() => {
+    const delay = Math.min(
+      INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current),
+      MAX_RECONNECT_DELAY
+    );
+    return delay;
+  }, []);
+
   const connect = useCallback(() => {
     if (!xtermRef.current) return;
+
+    // Clear any pending reconnect
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
 
     const wsUrl = getWebSocketUrl(sessionId);
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    intentionalCloseRef.current = false;
 
     ws.onopen = () => {
-      xtermRef.current?.writeln("\x1b[32mConnected to session\x1b[0m\r\n");
+      // Show reconnected message if we had previous attempts
+      if (reconnectAttemptsRef.current > 0) {
+        xtermRef.current?.writeln("\x1b[32mReconnected\x1b[0m\r\n");
+      } else {
+        xtermRef.current?.writeln("\x1b[32mConnected to session\x1b[0m\r\n");
+      }
+
+      // Reset reconnection attempts on successful connection
+      reconnectAttemptsRef.current = 0;
+
       // Send initial resize
       if (fitAddonRef.current && xtermRef.current) {
         const dims = fitAddonRef.current.proposeDimensions();
@@ -121,12 +156,21 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
             }, 50);
             break;
           case "exit":
+            intentionalCloseRef.current = true; // Don't reconnect on exit
             xtermRef.current?.writeln(`\r\n\x1b[33mSession exited with code ${msg.code}\x1b[0m`);
             onExit?.(msg.code);
             break;
           case "error":
             xtermRef.current?.writeln(`\r\n\x1b[31mError: ${msg.message}\x1b[0m`);
             onError?.(msg.message);
+            break;
+          case "ping":
+            // Respond to server pings to keep connection alive
+            try {
+              ws.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
+            } catch {
+              // Ignore send errors
+            }
             break;
         }
       } catch (e) {
@@ -135,26 +179,43 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
     };
 
     ws.onclose = (event) => {
+      // Don't reconnect if it was intentional or session exited
+      if (intentionalCloseRef.current) {
+        return;
+      }
+
       // 1000 = normal close, 1005 = no status received (normal for some scenarios)
-      // Only show message for unexpected closures
-      if (event.code !== 1000 && event.code !== 1005) {
+      const isAbnormalClose = event.code !== 1000 && event.code !== 1005;
+
+      if (isAbnormalClose) {
         xtermRef.current?.writeln(`\r\n\x1b[33mConnection closed (${event.code})\x1b[0m`);
       }
-      // If WebSocket closed unexpectedly, fall back to polling
-      if (!usingPollingRef.current && event.code !== 1000 && event.code !== 1005) {
-        xtermRef.current?.writeln("\x1b[33mFalling back to HTTP polling...\x1b[0m\r\n");
+
+      // Try to reconnect if we haven't exceeded max attempts
+      if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS && !usingPollingRef.current) {
+        const delay = getReconnectDelay();
+        reconnectAttemptsRef.current++;
+
+        xtermRef.current?.writeln(`\x1b[33mReconnecting in ${delay / 1000}s... (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})\x1b[0m`);
+
+        reconnectTimeoutRef.current = setTimeout(() => {
+          connect();
+        }, delay);
+      } else if (!usingPollingRef.current) {
+        // Max attempts reached, fall back to polling
+        xtermRef.current?.writeln("\x1b[33mMax reconnection attempts reached. Falling back to HTTP polling...\x1b[0m\r\n");
         startPolling();
       }
     };
 
     ws.onerror = () => {
-      xtermRef.current?.writeln("\r\n\x1b[31mWebSocket error - falling back to HTTP polling\x1b[0m");
-      // Fall back to HTTP polling
-      if (!usingPollingRef.current) {
-        startPolling();
+      // Don't log error if we're already using polling or intentionally closed
+      if (!usingPollingRef.current && !intentionalCloseRef.current) {
+        xtermRef.current?.writeln("\r\n\x1b[31mWebSocket error\x1b[0m");
       }
+      // Note: onclose will be called after onerror, which handles reconnection
     };
-  }, [sessionId, onExit, onError, startPolling]);
+  }, [sessionId, onExit, onError, startPolling, getReconnectDelay]);
 
   useEffect(() => {
     // Prevent re-initialization on re-renders
@@ -262,6 +323,13 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
 
     return () => {
       window.removeEventListener("resize", handleResize);
+      // Mark close as intentional to prevent reconnection attempts
+      intentionalCloseRef.current = true;
+      // Clear any pending reconnect timeout
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
       wsRef.current?.close();
       stopPolling();
       term.dispose();

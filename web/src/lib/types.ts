@@ -57,8 +57,10 @@ export type WebSocketMessage =
   | { type: "history"; data: string }
   | { type: "exit"; code: number }
   | { type: "error"; message: string }
-  | { type: "activity"; state: ActivityState };
+  | { type: "activity"; state: ActivityState }
+  | { type: "ping"; timestamp: number };
 
 export type ClientMessage =
   | { type: "input"; data: string }
-  | { type: "resize"; cols: number; rows: number };
+  | { type: "resize"; cols: number; rows: number }
+  | { type: "pong"; timestamp: number };

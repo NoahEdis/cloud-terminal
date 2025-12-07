@@ -64,10 +64,12 @@ export interface SessionInfo {
 // WebSocket message types
 export type ClientMessage =
   | { type: "input"; data: string }
-  | { type: "resize"; cols: number; rows: number };
+  | { type: "resize"; cols: number; rows: number }
+  | { type: "pong"; timestamp: number };
 
 export type ServerMessage =
   | { type: "output"; data: string }
   | { type: "history"; data: string }
   | { type: "exit"; code: number }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "ping"; timestamp: number };
