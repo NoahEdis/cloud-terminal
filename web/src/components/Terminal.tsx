@@ -1,0 +1,295 @@
+"use client";
+
+import { useEffect, useRef, useCallback, useState } from "react";
+import { Terminal as XTerm } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { ChevronDown } from "lucide-react";
+import { getWebSocketUrl, pollOutput, sendInput } from "@/lib/api";
+import type { WebSocketMessage } from "@/lib/types";
+import { Button } from "@/components/ui/button";
+
+interface TerminalProps {
+  sessionId: string;
+  onExit?: (code: number) => void;
+  onError?: (error: string) => void;
+}
+
+export interface TerminalHandle {
+  scrollToBottom: () => void;
+}
+
+export default function Terminal({ sessionId, onExit, onError }: TerminalProps) {
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const xtermRef = useRef<XTerm | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const offsetRef = useRef<number>(0);
+  const usingPollingRef = useRef<boolean>(false);
+  const initializedRef = useRef<boolean>(false);
+  const sessionIdRef = useRef<string>(sessionId);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const lastScrollCheckRef = useRef<number>(0);
+
+  // Keep sessionId ref updated
+  sessionIdRef.current = sessionId;
+
+  // Check if terminal is scrolled to bottom (with tolerance for edge cases)
+  const checkIfAtBottom = useCallback(() => {
+    if (!xtermRef.current) return true;
+    const buffer = xtermRef.current.buffer.active;
+    // Add a small tolerance (2 lines) to handle edge cases
+    const tolerance = 2;
+    return buffer.viewportY >= buffer.baseY - tolerance;
+  }, []);
+
+  // Scroll to bottom helper
+  const scrollToBottom = useCallback(() => {
+    if (xtermRef.current) {
+      xtermRef.current.scrollToBottom();
+      setShowScrollButton(false);
+    }
+  }, []);
+
+  // Stop polling - defined first so it can be used by startPolling
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  }, []);
+
+  // Start HTTP polling fallback
+  const startPolling = useCallback(() => {
+    if (pollingRef.current) return; // Already polling
+    usingPollingRef.current = true;
+    xtermRef.current?.writeln("\x1b[33mUsing HTTP polling mode\x1b[0m\r\n");
+
+    const poll = async () => {
+      try {
+        const response = await pollOutput(sessionId, offsetRef.current);
+        if (response.output) {
+          xtermRef.current?.write(response.output);
+        }
+        offsetRef.current = response.offset;
+
+        if (response.status === "exited" && response.exitCode !== undefined) {
+          xtermRef.current?.writeln(`\r\n\x1b[33mSession exited with code ${response.exitCode}\x1b[0m`);
+          onExit?.(response.exitCode);
+          stopPolling();
+        }
+      } catch (e) {
+        console.error("Polling error:", e);
+      }
+    };
+
+    // Poll immediately, then every 100ms
+    poll();
+    pollingRef.current = setInterval(poll, 100);
+  }, [sessionId, onExit, stopPolling]);
+
+  const connect = useCallback(() => {
+    if (!xtermRef.current) return;
+
+    const wsUrl = getWebSocketUrl(sessionId);
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      xtermRef.current?.writeln("\x1b[32mConnected to session\x1b[0m\r\n");
+      // Send initial resize
+      if (fitAddonRef.current && xtermRef.current) {
+        const dims = fitAddonRef.current.proposeDimensions();
+        if (dims) {
+          ws.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
+        }
+      }
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg: WebSocketMessage = JSON.parse(event.data);
+        switch (msg.type) {
+          case "output":
+            xtermRef.current?.write(msg.data);
+            break;
+          case "history":
+            xtermRef.current?.write(msg.data);
+            // Scroll to bottom after history loads
+            setTimeout(() => {
+              xtermRef.current?.scrollToBottom();
+            }, 50);
+            break;
+          case "exit":
+            xtermRef.current?.writeln(`\r\n\x1b[33mSession exited with code ${msg.code}\x1b[0m`);
+            onExit?.(msg.code);
+            break;
+          case "error":
+            xtermRef.current?.writeln(`\r\n\x1b[31mError: ${msg.message}\x1b[0m`);
+            onError?.(msg.message);
+            break;
+        }
+      } catch (e) {
+        console.error("Failed to parse message:", e);
+      }
+    };
+
+    ws.onclose = (event) => {
+      // 1000 = normal close, 1005 = no status received (normal for some scenarios)
+      // Only show message for unexpected closures
+      if (event.code !== 1000 && event.code !== 1005) {
+        xtermRef.current?.writeln(`\r\n\x1b[33mConnection closed (${event.code})\x1b[0m`);
+      }
+      // If WebSocket closed unexpectedly, fall back to polling
+      if (!usingPollingRef.current && event.code !== 1000 && event.code !== 1005) {
+        xtermRef.current?.writeln("\x1b[33mFalling back to HTTP polling...\x1b[0m\r\n");
+        startPolling();
+      }
+    };
+
+    ws.onerror = () => {
+      xtermRef.current?.writeln("\r\n\x1b[31mWebSocket error - falling back to HTTP polling\x1b[0m");
+      // Fall back to HTTP polling
+      if (!usingPollingRef.current) {
+        startPolling();
+      }
+    };
+  }, [sessionId, onExit, onError, startPolling]);
+
+  useEffect(() => {
+    // Prevent re-initialization on re-renders
+    if (initializedRef.current || !terminalRef.current) return;
+    initializedRef.current = true;
+
+    // Create terminal with phosphor theme
+    const term = new XTerm({
+      cursorBlink: true,
+      cursorStyle: "block",
+      fontSize: 14,
+      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      fontWeight: "400",
+      letterSpacing: 0,
+      lineHeight: 1.2,
+      scrollback: 10000, // Enable scrollback buffer (10k lines)
+      scrollOnUserInput: true, // Auto-scroll when user types
+      theme: {
+        background: "#050508",
+        foreground: "#E8ECF4",
+        cursor: "#39FF14",
+        cursorAccent: "#050508",
+        selectionBackground: "rgba(57, 255, 20, 0.2)",
+        selectionForeground: "#E8ECF4",
+        black: "#1a1a1f",
+        red: "#FF3366",
+        green: "#39FF14",
+        yellow: "#FFB800",
+        blue: "#00D4FF",
+        magenta: "#C084FC",
+        cyan: "#00D4FF",
+        white: "#E8ECF4",
+        brightBlack: "#4a4a55",
+        brightRed: "#FF6B8A",
+        brightGreen: "#6BFF4D",
+        brightYellow: "#FFD54F",
+        brightBlue: "#4DE8FF",
+        brightMagenta: "#D4A5FF",
+        brightCyan: "#4DE8FF",
+        brightWhite: "#FFFFFF",
+      },
+    });
+
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+
+    term.open(terminalRef.current);
+    fitAddon.fit();
+
+    xtermRef.current = term;
+    fitAddonRef.current = fitAddon;
+
+    // Track scroll position to show/hide scroll button
+    // Use throttling to prevent excessive state updates during rapid scrolling
+    term.onScroll(() => {
+      const now = Date.now();
+      // Throttle scroll checks to every 100ms
+      if (now - lastScrollCheckRef.current < 100) return;
+      lastScrollCheckRef.current = now;
+
+      const isAtBottom = checkIfAtBottom();
+      setShowScrollButton(!isAtBottom);
+    });
+
+    // Also check scroll position when new content is written
+    // This ensures the button shows up when output pushes content out of view
+    term.onWriteParsed(() => {
+      // Only check if we weren't already showing the button
+      // and debounce to avoid excessive checks
+      const now = Date.now();
+      if (now - lastScrollCheckRef.current < 50) return;
+      lastScrollCheckRef.current = now;
+
+      const isAtBottom = checkIfAtBottom();
+      setShowScrollButton(!isAtBottom);
+    });
+
+    // Handle input - use WebSocket if available, otherwise HTTP
+    term.onData((data) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: "input", data }));
+      } else if (usingPollingRef.current) {
+        // Use HTTP API to send input when in polling mode
+        sendInput(sessionIdRef.current, data).catch((e) => {
+          console.error("Failed to send input:", e);
+        });
+      }
+    });
+
+    // Handle resize
+    const handleResize = () => {
+      fitAddon.fit();
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        const dims = fitAddon.proposeDimensions();
+        if (dims) {
+          wsRef.current.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
+        }
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    // Connect to WebSocket
+    connect();
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      wsRef.current?.close();
+      stopPolling();
+      term.dispose();
+      initializedRef.current = false;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, checkIfAtBottom]);
+
+  return (
+    <div className="relative w-full h-full">
+      <div
+        ref={terminalRef}
+        className="terminal-container w-full h-full bg-zinc-950 rounded-lg overflow-hidden"
+        style={{
+          WebkitOverflowScrolling: "touch",
+        }}
+      />
+      {/* Scroll to bottom button */}
+      {showScrollButton && (
+        <Button
+          onClick={scrollToBottom}
+          size="icon"
+          variant="secondary"
+          className="absolute bottom-4 right-4 h-10 w-10 rounded-full shadow-lg bg-primary/90 hover:bg-primary text-primary-foreground border border-primary/50 z-10"
+        >
+          <ChevronDown className="w-5 h-5" />
+        </Button>
+      )}
+    </div>
+  );
+}

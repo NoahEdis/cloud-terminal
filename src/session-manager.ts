@@ -1,9 +1,38 @@
 import * as pty from "node-pty";
 import { v4 as uuidv4 } from "uuid";
 import type { WebSocket } from "ws";
-import type { Session, SessionConfig, SessionInfo } from "./types.js";
+import type { Session, SessionConfig, SessionInfo, ActivityState, HookEvent } from "./types.js";
+import * as supabase from "./supabase.js";
 
 const MAX_BUFFER_SIZE = 100_000; // ~2000 lines of 50 chars
+
+// Patterns that indicate a shell prompt (waiting for input)
+const PROMPT_PATTERNS = [
+  /[$%#>]\s*$/,                    // Common shell prompts
+  /\]\$\s*$/,                      // bash: [user@host dir]$
+  /❯\s*$/,                         // starship/oh-my-zsh
+  /➜\s*$/,                         // oh-my-zsh themes
+  /λ\s*$/,                         // lambda prompts
+  />>>\s*$/,                       // Python REPL
+  /\.\.\.\s*$/,                    // Python continuation
+  /irb.*>\s*$/,                    // Ruby IRB
+  />\s*$/,                         // Generic prompt
+  /\(y\/n\)\s*$/i,                 // Yes/no prompts
+  /\[Y\/n\]\s*$/i,                 // Debian-style prompts
+  /:\s*$/,                         // Password prompts, vim commands
+  /\?\s*$/,                        // Question prompts
+];
+
+// Check if the buffer ends with something that looks like a prompt
+function detectPrompt(buffer: string): boolean {
+  // Get the last line (or last 200 chars if very long)
+  const tail = buffer.slice(-200);
+  const lines = tail.split(/\r?\n/);
+  const lastLine = lines[lines.length - 1] || lines[lines.length - 2] || "";
+
+  // Check against prompt patterns
+  return PROMPT_PATTERNS.some(pattern => pattern.test(lastLine));
+}
 
 export class SessionManager {
   private sessions = new Map<string, Session>();
@@ -43,19 +72,28 @@ export class SessionManager {
       rows,
       createdAt: new Date(),
       lastActivity: new Date(),
+      lastOutputTime: new Date(),
       outputBuffer: "",
       clients: new Set(),
       status: "running",
+      activityState: "busy", // Starts busy until first prompt appears
+      externallyControlled: false, // Will be set true when Claude Code hooks update state
     };
 
     // Handle PTY output
     ptyProcess.onData((data: string) => {
       session.lastActivity = new Date();
+      session.lastOutputTime = new Date();
 
       // Append to buffer, trim if too large
       session.outputBuffer += data;
       if (session.outputBuffer.length > MAX_BUFFER_SIZE) {
         session.outputBuffer = session.outputBuffer.slice(-MAX_BUFFER_SIZE);
+      }
+
+      // Only use prompt detection if not externally controlled by Claude Code hooks
+      if (!session.externallyControlled) {
+        session.activityState = detectPrompt(session.outputBuffer) ? "idle" : "busy";
       }
 
       // Broadcast to all connected clients
@@ -66,12 +104,16 @@ export class SessionManager {
           client.send(message);
         }
       }
+
+      // Log output to Supabase (batched for efficiency)
+      supabase.appendOutput(session.id, data);
     });
 
     // Handle PTY exit
     ptyProcess.onExit(({ exitCode }) => {
       session.status = "exited";
       session.exitCode = exitCode;
+      session.activityState = "exited";
 
       const message = JSON.stringify({ type: "exit", code: exitCode });
       for (const client of session.clients) {
@@ -79,10 +121,35 @@ export class SessionManager {
           client.send(message);
         }
       }
+
+      // Update status in Supabase
+      supabase.updateSessionStatus(session.id, {
+        status: "exited",
+        exitCode,
+        activityState: "exited",
+        lastActivity: new Date(),
+      });
     });
 
     this.sessions.set(id, session);
     console.log(`[SessionManager] Created session ${id} running: ${shell} ${args.join(" ")}`);
+
+    // Persist to Supabase
+    supabase.createSession({
+      id: session.id,
+      command: session.command,
+      args: session.args,
+      cwd: session.cwd,
+      cols: session.cols,
+      rows: session.rows,
+      status: session.status,
+      activityState: session.activityState,
+      externallyControlled: session.externallyControlled,
+      createdAt: session.createdAt,
+      lastActivity: session.lastActivity,
+      lastOutputTime: session.lastOutputTime,
+    });
+
     return session;
   }
 
@@ -103,6 +170,7 @@ export class SessionManager {
       status: s.status,
       exitCode: s.exitCode,
       clientCount: s.clients.size,
+      activityState: s.activityState,
     }));
   }
 
@@ -117,6 +185,10 @@ export class SessionManager {
     }
     this.sessions.delete(id);
     console.log(`[SessionManager] Killed session ${id}`);
+
+    // Delete from Supabase
+    supabase.deleteSession(id);
+
     return true;
   }
 
@@ -184,11 +256,78 @@ export class SessionManager {
     }
   }
 
-  shutdown(): void {
+  async shutdown(): Promise<void> {
     clearInterval(this.cleanupInterval);
     for (const [id] of this.sessions) {
       this.kill(id);
     }
+    // Flush any pending output to Supabase
+    await supabase.shutdownSupabase();
+  }
+
+  // Initialize persistence (call on startup)
+  async init(): Promise<void> {
+    await supabase.initSupabase();
+  }
+
+  // Find sessions by working directory (for Claude Code hook integration)
+  // Returns sessions where the hook's cwd is within the session's cwd tree
+  // e.g., hook cwd=/Users/foo/project/src matches session cwd=/Users/foo/project
+  // NOTE: We only match when hook's cwd is INSIDE or EQUAL to session's cwd.
+  // This prevents hooks from parent directories from affecting sibling sessions.
+  findByCwd(cwd: string): Session[] {
+    const normalizedCwd = cwd.replace(/\/+$/, ""); // Remove trailing slash
+    const matches: Session[] = [];
+
+    for (const session of this.sessions.values()) {
+      const sessionCwd = session.cwd.replace(/\/+$/, "");
+      // Match if:
+      // 1. Exact match, OR
+      // 2. Hook's cwd is inside session's cwd (hook is in a subdirectory of the session)
+      // We intentionally do NOT match if session's cwd is inside hook's cwd, because
+      // a hook from /Users/foo should NOT affect sessions in /Users/foo/project1 and /Users/foo/project2
+      if (
+        sessionCwd === normalizedCwd ||
+        normalizedCwd.startsWith(sessionCwd + "/")
+      ) {
+        matches.push(session);
+      }
+    }
+
+    return matches;
+  }
+
+  // Update activity state for a session (called by Claude Code hooks)
+  setActivityState(id: string, state: ActivityState): boolean {
+    const session = this.sessions.get(id);
+    if (!session) return false;
+
+    // Don't update if session has exited
+    if (session.status === "exited") return false;
+
+    session.activityState = state;
+    session.lastActivity = new Date();
+    // Once a hook updates the state, disable prompt-based detection for this session
+    session.externallyControlled = true;
+
+    // Broadcast activity state change to connected clients
+    const message = JSON.stringify({ type: "activity", state });
+    for (const client of session.clients) {
+      if (client.readyState === 1) {
+        client.send(message);
+      }
+    }
+
+    console.log(`[SessionManager] Session ${id} activity state -> ${state}`);
+
+    // Persist to Supabase
+    supabase.updateSessionStatus(id, {
+      activityState: state,
+      externallyControlled: true,
+      lastActivity: session.lastActivity,
+    });
+
+    return true;
   }
 }
 

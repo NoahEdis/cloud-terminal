@@ -1,8 +1,9 @@
 import { Context, Next } from "hono";
 
-const API_KEY = process.env.API_KEY;
-
 export async function authMiddleware(c: Context, next: Next) {
+  // Read at runtime to ensure dotenv has loaded
+  const API_KEY = process.env.API_KEY;
+
   // Skip auth if no API_KEY is configured (local development)
   if (!API_KEY) {
     return next();

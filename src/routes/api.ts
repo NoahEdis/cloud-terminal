@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { sessionManager } from "../session-manager.js";
-import type { SessionConfig } from "../types.js";
+import type { SessionConfig, HookEvent, ActivityState } from "../types.js";
 
 export const api = new Hono();
 
@@ -110,4 +110,113 @@ api.post("/sessions/:id/resize", async (c) => {
   }
 
   return c.json({ success: true });
+});
+
+// Poll for output - HTTP fallback when WebSocket isn't available
+// Returns output from offset to current, plus current buffer length
+api.get("/sessions/:id/output", (c) => {
+  const id = c.req.param("id");
+  const session = sessionManager.get(id);
+
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const offsetStr = c.req.query("offset");
+  const offset = offsetStr ? parseInt(offsetStr, 10) : 0;
+  const bufferLength = session.outputBuffer.length;
+
+  // Return new output since offset
+  const newOutput = offset < bufferLength ? session.outputBuffer.slice(offset) : "";
+
+  return c.json({
+    output: newOutput,
+    offset: bufferLength,
+    status: session.status,
+    exitCode: session.exitCode,
+  });
+});
+
+// Map Claude Code hook events to activity states
+function hookEventToActivityState(event: HookEvent): ActivityState {
+  switch (event) {
+    case "UserPromptSubmit":
+    case "PreToolUse":
+    case "PostToolUse":
+      return "busy";
+    case "Notification":
+    case "Stop":
+      return "idle";
+    case "SessionEnd":
+      return "exited";
+    default:
+      return "busy";
+  }
+}
+
+// Claude Code hook webhook - receives activity updates from Claude Code
+// IMPORTANT: session_name/session_id is the preferred identifier for accurate per-terminal tracking
+api.post("/hook", async (c) => {
+  const body = await c.req.json<{
+    event: HookEvent;
+    cwd?: string;
+    session_id?: string;    // PTY mode session UUID
+    session_name?: string;  // tmux session name (for cross-compatibility)
+    tool_name?: string;     // For PreToolUse/PostToolUse
+  }>();
+
+  if (!body.event) {
+    return c.json({ error: "event is required" }, 400);
+  }
+
+  const newState = hookEventToActivityState(body.event);
+  let updatedCount = 0;
+  let targetedSession = "";
+
+  // PRIORITY 1: If session_id or session_name provided, ONLY update that specific session
+  // This prevents the bug where all terminals in the same directory get updated
+  const targetId = body.session_id || body.session_name;
+  if (targetId) {
+    const success = sessionManager.setActivityState(targetId, newState);
+    if (success) {
+      updatedCount++;
+      targetedSession = targetId;
+    }
+    // Don't fall through to cwd matching - explicit session ID is definitive
+  }
+  // PRIORITY 2: Fall back to cwd matching ONLY if no session ID provided
+  else if (body.cwd) {
+    const sessions = sessionManager.findByCwd(body.cwd);
+    for (const session of sessions) {
+      const success = sessionManager.setActivityState(session.id, newState);
+      if (success) updatedCount++;
+    }
+    targetedSession = `cwd:${body.cwd} (${sessions.length} matches)`;
+  }
+  // PRIORITY 3: No identifier provided - error
+  else {
+    return c.json({ error: "Either session_id, session_name, or cwd is required" }, 400);
+  }
+
+  console.log(`[Hook] ${body.event} -> ${newState} | target: ${targetedSession || "none"} | updated: ${updatedCount}${body.tool_name ? ` | tool: ${body.tool_name}` : ""}`);
+
+  return c.json({ success: true, updated: updatedCount, state: newState, target: targetedSession });
+});
+
+// Update activity state directly for a specific session
+api.post("/sessions/:id/activity", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json<{ state: ActivityState }>();
+
+  if (!body.state || !["idle", "busy", "exited"].includes(body.state)) {
+    return c.json({ error: "state must be one of: idle, busy, exited" }, 400);
+  }
+
+  const success = sessionManager.setActivityState(id, body.state);
+
+  if (!success) {
+    return c.json({ error: "Session not found or already exited" }, 404);
+  }
+
+  return c.json({ success: true, state: body.state });
 });

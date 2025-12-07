@@ -1,0 +1,303 @@
+/**
+ * Tmux integration for cloud-terminal.
+ *
+ * Provides functions to interact with tmux sessions, allowing
+ * bidirectional sync between local tmux sessions and cloud terminal.
+ */
+
+import { exec, spawn, ChildProcess } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
+
+export interface TmuxSession {
+  name: string;
+  id: string; // tmux session id (e.g., "$0")
+  windows: number;
+  created: Date;
+  attached: boolean;
+  width: number;
+  height: number;
+  lastActivity: Date;
+}
+
+export interface TmuxWindow {
+  index: number;
+  name: string;
+  active: boolean;
+  panes: number;
+}
+
+/**
+ * Check if tmux is available on the system.
+ */
+export async function isTmuxAvailable(): Promise<boolean> {
+  try {
+    await execAsync("which tmux");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get the tmux server PID, or null if not running.
+ */
+export async function getTmuxServerPid(): Promise<number | null> {
+  try {
+    const { stdout } = await execAsync("tmux list-sessions -F '#{pid}' 2>/dev/null | head -1");
+    const pid = parseInt(stdout.trim(), 10);
+    return isNaN(pid) ? null : pid;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * List all tmux sessions.
+ */
+export async function listSessions(): Promise<TmuxSession[]> {
+  try {
+    // Format: session_name:session_id:windows:created:attached:width:height:activity
+    const format = "#{session_name}:#{session_id}:#{session_windows}:#{session_created}:#{session_attached}:#{session_width}:#{session_height}:#{session_activity}";
+    const { stdout } = await execAsync(`tmux list-sessions -F '${format}' 2>/dev/null`);
+
+    return stdout
+      .trim()
+      .split("\n")
+      .filter(line => line.length > 0)
+      .map(line => {
+        const [name, id, windows, created, attached, width, height, activity] = line.split(":");
+        return {
+          name,
+          id,
+          windows: parseInt(windows, 10),
+          created: new Date(parseInt(created, 10) * 1000),
+          attached: attached === "1",
+          width: parseInt(width, 10),
+          height: parseInt(height, 10),
+          lastActivity: new Date(parseInt(activity, 10) * 1000),
+        };
+      });
+  } catch {
+    // No sessions or tmux not running
+    return [];
+  }
+}
+
+/**
+ * Check if a session with the given name exists.
+ */
+export async function sessionExists(name: string): Promise<boolean> {
+  try {
+    await execAsync(`tmux has-session -t '${escapeTmuxName(name)}' 2>/dev/null`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Create a new tmux session.
+ * Returns the session name.
+ */
+export async function createSession(options: {
+  name?: string;
+  cwd?: string;
+  command?: string;
+  width?: number;
+  height?: number;
+}): Promise<string> {
+  const name = options.name || `cloud-${Date.now()}`;
+  const cwd = options.cwd || process.env.HOME || "/";
+  const width = options.width || 80;
+  const height = options.height || 24;
+
+  // Build tmux new-session command
+  let cmd = `tmux new-session -d -s '${escapeTmuxName(name)}' -x ${width} -y ${height}`;
+
+  if (cwd) {
+    cmd += ` -c '${cwd}'`;
+  }
+
+  if (options.command) {
+    cmd += ` '${options.command}'`;
+  }
+
+  await execAsync(cmd);
+  return name;
+}
+
+/**
+ * Kill a tmux session.
+ */
+export async function killSession(name: string): Promise<boolean> {
+  try {
+    await execAsync(`tmux kill-session -t '${escapeTmuxName(name)}'`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Rename a tmux session.
+ */
+export async function renameSession(oldName: string, newName: string): Promise<boolean> {
+  try {
+    await execAsync(`tmux rename-session -t '${escapeTmuxName(oldName)}' '${escapeTmuxName(newName)}'`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resize a tmux session's window.
+ */
+export async function resizeSession(name: string, width: number, height: number): Promise<boolean> {
+  try {
+    // Resize the session's active window
+    await execAsync(`tmux resize-window -t '${escapeTmuxName(name)}' -x ${width} -y ${height}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Send keys to a tmux session.
+ */
+export async function sendKeys(name: string, keys: string, literal: boolean = false): Promise<boolean> {
+  try {
+    const literalFlag = literal ? "-l" : "";
+    await execAsync(`tmux send-keys -t '${escapeTmuxName(name)}' ${literalFlag} '${escapeShellArg(keys)}'`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Capture the current pane content from a tmux session.
+ */
+export async function capturePane(name: string, options: {
+  start?: number;
+  end?: number;
+  escape?: boolean;
+} = {}): Promise<string> {
+  try {
+    let cmd = `tmux capture-pane -t '${escapeTmuxName(name)}' -p`;
+
+    if (options.start !== undefined) {
+      cmd += ` -S ${options.start}`;
+    }
+    if (options.end !== undefined) {
+      cmd += ` -E ${options.end}`;
+    }
+    if (options.escape) {
+      cmd += " -e"; // Include escape sequences
+    }
+
+    const { stdout } = await execAsync(cmd);
+    return stdout;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Get session info by name.
+ */
+export async function getSession(name: string): Promise<TmuxSession | null> {
+  const sessions = await listSessions();
+  return sessions.find(s => s.name === name) || null;
+}
+
+/**
+ * Watch for tmux session changes.
+ * Returns a function to stop watching.
+ */
+export function watchSessions(
+  callback: (sessions: TmuxSession[]) => void,
+  intervalMs: number = 2000
+): () => void {
+  let running = true;
+  let lastSessionList = "";
+
+  const poll = async () => {
+    while (running) {
+      try {
+        const sessions = await listSessions();
+        const sessionList = JSON.stringify(sessions.map(s => s.name).sort());
+
+        // Only callback if sessions changed
+        if (sessionList !== lastSessionList) {
+          lastSessionList = sessionList;
+          callback(sessions);
+        }
+      } catch (err) {
+        console.error("[Tmux] Error polling sessions:", err);
+      }
+
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+  };
+
+  poll();
+
+  return () => {
+    running = false;
+  };
+}
+
+/**
+ * Spawn a PTY process that attaches to a tmux session.
+ * This is used to bridge WebSocket connections to tmux.
+ */
+export function spawnAttach(
+  sessionName: string,
+  options: {
+    cols?: number;
+    rows?: number;
+  } = {}
+): ChildProcess {
+  const cols = options.cols || 80;
+  const rows = options.rows || 24;
+
+  // Use script to allocate a PTY for tmux attach
+  // This ensures proper terminal handling
+  const child = spawn("tmux", ["attach-session", "-t", sessionName], {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      TERM: "xterm-256color",
+      COLUMNS: String(cols),
+      LINES: String(rows),
+    },
+  });
+
+  return child;
+}
+
+/**
+ * Get the control mode output stream for a session.
+ * This allows programmatic interaction with tmux.
+ */
+export function attachControlMode(sessionName: string): ChildProcess {
+  return spawn("tmux", ["-C", "attach-session", "-t", sessionName], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
+// Helper functions
+
+function escapeTmuxName(name: string): string {
+  // Escape special characters in tmux session names
+  return name.replace(/'/g, "'\"'\"'");
+}
+
+function escapeShellArg(arg: string): string {
+  // Escape for shell
+  return arg.replace(/'/g, "'\"'\"'");
+}
