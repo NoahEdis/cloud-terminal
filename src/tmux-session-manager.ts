@@ -100,9 +100,9 @@ const CLAUDE_MESSAGE_PATTERNS = [
 
 // Update metrics based on new output data
 function updateMetrics(metrics: SessionMetrics, newData: string, fullBuffer: string): void {
-  // Count new lines in the new data
-  const newLines = (newData.match(/\n/g) || []).length;
-  metrics.lineCount += newLines;
+  // Count actual lines in the buffer (not cumulative - accounts for buffer trimming)
+  // This gives the real line count of what's currently in the buffer
+  metrics.lineCount = (fullBuffer.match(/\n/g) || []).length;
 
   // Update character count
   metrics.charCount = fullBuffer.length;
@@ -111,6 +111,7 @@ function updateMetrics(metrics: SessionMetrics, newData: string, fullBuffer: str
   metrics.estimatedTokens = Math.ceil(metrics.charCount / 4);
 
   // Try to detect Claude message boundaries in new output
+  // Note: messageCount is still cumulative since we can't re-scan the whole buffer efficiently
   for (const pattern of CLAUDE_MESSAGE_PATTERNS) {
     const matches = newData.match(new RegExp(pattern, 'g'));
     if (matches) {
