@@ -88,6 +88,15 @@ export async function killSession(id: string): Promise<void> {
   }
 }
 
+export async function killAllSessions(): Promise<void> {
+  const sessions = await listSessions();
+  await Promise.all(sessions.map((s) => {
+    const id = s.source === "local" ? s.id : s.name;
+    if (!id) return Promise.resolve(); // Skip if no valid ID
+    return killSession(id);
+  }));
+}
+
 export async function sendInput(id: string, input: string): Promise<void> {
   const res = await fetch(`${getApiUrl()}/api/sessions/${id}/send`, {
     method: "POST",
@@ -582,6 +591,89 @@ export function subscribeToMessages(
   return () => {
     active = false;
   };
+}
+
+// ============================================================================
+// Session History/Archive - Stores killed sessions for later viewing
+// ============================================================================
+
+const SESSION_HISTORY_KEY = "terminal_session_history";
+const MAX_ARCHIVED_SESSIONS = 100;
+
+export interface ArchivedSession {
+  id: string;
+  name: string;
+  command: string;
+  cwd: string;
+  createdAt: string;
+  killedAt: string;
+  folder?: string;
+  description?: string;
+}
+
+export function getArchivedSessions(): ArchivedSession[] {
+  if (typeof window === "undefined") return [];
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_HISTORY_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+export function archiveSession(session: {
+  id: string;
+  name?: string;
+  command?: string;
+  cwd: string;
+  createdAt?: string;
+}): void {
+  const archived = getArchivedSessions();
+  const sessionFolders = getSessionFolders();
+  const sessionDescriptions = getSessionDescriptions();
+  const sessionNames = getSessionNames();
+
+  // Don't archive if already exists
+  if (archived.some((s) => s.id === session.id)) return;
+
+  const archivedSession: ArchivedSession = {
+    id: session.id,
+    name: sessionNames[session.id] || session.name || session.id.slice(0, 8),
+    command: session.command || "zsh",
+    cwd: session.cwd,
+    createdAt: session.createdAt || new Date().toISOString(),
+    killedAt: new Date().toISOString(),
+    folder: sessionFolders[session.id],
+    description: sessionDescriptions[session.id],
+  };
+
+  // Add to front and limit size
+  archived.unshift(archivedSession);
+  const trimmed = archived.slice(0, MAX_ARCHIVED_SESSIONS);
+
+  localStorage.setItem(SESSION_HISTORY_KEY, JSON.stringify(trimmed));
+}
+
+export function removeArchivedSession(id: string): void {
+  const archived = getArchivedSessions().filter((s) => s.id !== id);
+  localStorage.setItem(SESSION_HISTORY_KEY, JSON.stringify(archived));
+}
+
+export function clearArchivedSessions(): void {
+  localStorage.setItem(SESSION_HISTORY_KEY, JSON.stringify([]));
+}
+
+export function searchArchivedSessions(query: string): ArchivedSession[] {
+  const archived = getArchivedSessions();
+  if (!query.trim()) return archived;
+
+  const lowerQuery = query.toLowerCase();
+  return archived.filter((s) =>
+    s.name.toLowerCase().includes(lowerQuery) ||
+    s.cwd.toLowerCase().includes(lowerQuery) ||
+    s.command.toLowerCase().includes(lowerQuery) ||
+    s.folder?.toLowerCase().includes(lowerQuery) ||
+    s.description?.toLowerCase().includes(lowerQuery)
+  );
 }
 
 /**

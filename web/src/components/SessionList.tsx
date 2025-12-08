@@ -19,11 +19,16 @@ import {
   Star,
   Clock,
   FileCode,
+  Search,
+  Archive,
+  History,
+  AlertTriangle,
 } from "lucide-react";
 import {
   listSessions,
   createSession,
   killSession,
+  killAllSessions,
   getSessionNames,
   setSessionName,
   getDefaultApiUrl,
@@ -44,6 +49,12 @@ import {
   setFolderDescription,
   getFolderDocFiles,
   setFolderDocFile,
+  archiveSession,
+  getArchivedSessions,
+  searchArchivedSessions,
+  removeArchivedSession,
+  clearArchivedSessions,
+  type ArchivedSession,
 } from "@/lib/api";
 import type { SessionInfo, SessionConfig, ActivityState, SessionMetrics } from "@/lib/types";
 import { getSessionId } from "@/lib/types";
@@ -143,14 +154,23 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
   const [folderDocFiles, setFolderDocFilesState] = useState<Record<string, string>>({});
   const [editingDocFile, setEditingDocFile] = useState<string | null>(null);
   const [newDocFile, setNewDocFile] = useState("");
+  // Search and archived sessions state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedSessions, setArchivedSessionsState] = useState<ArchivedSession[]>([]);
+  const [isKillingAll, setIsKillingAll] = useState(false);
+  // Drag and drop state
+  const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
+  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
 
-  // Load saved and recent directories, descriptions, and doc files
+  // Load saved and recent directories, descriptions, doc files, and archived sessions
   useEffect(() => {
     setSavedDirectoriesState(getSavedDirectories());
     setRecentDirectoriesState(getRecentDirectories());
     setSessionDescriptionsState(getSessionDescriptions());
     setFolderDescriptionsState(getFolderDescriptions());
     setFolderDocFilesState(getFolderDocFiles());
+    setArchivedSessionsState(getArchivedSessions());
   }, []);
 
   const fetchSessions = useCallback(async () => {
@@ -185,6 +205,27 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
     return () => clearInterval(interval);
   }, [fetchSessions]);
 
+  // Filter sessions and archived sessions by search query
+  const filteredSessions = useMemo(() => {
+    if (!searchQuery.trim()) return sessions;
+    const query = searchQuery.toLowerCase();
+    return sessions.filter((session) => {
+      const sessionId = getSessionId(session);
+      const name = sessionNames[sessionId] || session.name || "";
+      const description = sessionDescriptions[sessionId] || "";
+      return (
+        name.toLowerCase().includes(query) ||
+        session.cwd.toLowerCase().includes(query) ||
+        (session.command || "").toLowerCase().includes(query) ||
+        description.toLowerCase().includes(query)
+      );
+    });
+  }, [sessions, searchQuery, sessionNames, sessionDescriptions]);
+
+  const filteredArchivedSessions = useMemo(() => {
+    return searchArchivedSessions(searchQuery);
+  }, [searchQuery, archivedSessions]);
+
   const groupedSessions = useMemo(() => {
     const groups: Record<string, SessionInfo[]> = { "": [] };
 
@@ -192,7 +233,7 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
       groups[folder] = [];
     }
 
-    for (const session of sessions) {
+    for (const session of filteredSessions) {
       const sessionId = getSessionId(session);
       const folder = sessionFolders[sessionId] || "";
       if (!groups[folder]) {
@@ -202,7 +243,7 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
     }
 
     return groups;
-  }, [sessions, sessionFolders, folders]);
+  }, [filteredSessions, sessionFolders, folders]);
 
   const handleCreate = async () => {
     try {
@@ -301,6 +342,19 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
     if (!confirm("Kill this session?")) return;
 
     try {
+      // Find the session to archive it before killing
+      const sessionToKill = sessions.find((s) => getSessionId(s) === id);
+      if (sessionToKill) {
+        archiveSession({
+          id: getSessionId(sessionToKill),
+          name: sessionToKill.name,
+          command: sessionToKill.command,
+          cwd: sessionToKill.cwd,
+          createdAt: sessionToKill.lastActivity,
+        });
+        setArchivedSessionsState(getArchivedSessions());
+      }
+
       await killSession(id);
       setSessions((prev) => prev.filter((s) => getSessionId(s) !== id));
       if (selectedId === id) {
@@ -309,6 +363,60 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to kill session");
     }
+  };
+
+  const handleKillAll = async () => {
+    if (!confirm("Kill ALL sessions? This action cannot be undone.")) return;
+
+    setIsKillingAll(true);
+    try {
+      // Archive all sessions before killing
+      for (const session of sessions) {
+        archiveSession({
+          id: getSessionId(session),
+          name: session.name,
+          command: session.command,
+          cwd: session.cwd,
+          createdAt: session.lastActivity,
+        });
+      }
+      setArchivedSessionsState(getArchivedSessions());
+
+      await killAllSessions();
+      setSessions([]);
+      onSelect("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to kill all sessions");
+    } finally {
+      setIsKillingAll(false);
+    }
+  };
+
+  // Drag and drop handlers
+  const handleDragStart = (sessionId: string) => {
+    setDraggedSessionId(sessionId);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedSessionId(null);
+    setDragOverFolder(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent, folderName: string) => {
+    e.preventDefault();
+    setDragOverFolder(folderName);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverFolder(null);
+  };
+
+  const handleDrop = (folderName: string) => {
+    if (draggedSessionId) {
+      handleMoveToFolder(draggedSessionId, folderName);
+    }
+    setDraggedSessionId(null);
+    setDragOverFolder(null);
   };
 
   const handleRename = (id: string, currentName: string) => {
@@ -416,6 +524,7 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
       setSessionDescriptionsState(getSessionDescriptions());
       setFolderDescriptionsState(getFolderDescriptions());
       setFolderDocFilesState(getFolderDocFiles());
+      setArchivedSessionsState(getArchivedSessions());
     };
     const interval = setInterval(syncLocalStorage, 500);
     return () => clearInterval(interval);
@@ -423,15 +532,19 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
 
   const renderSession = (session: SessionInfo) => {
     const sessionId = getSessionId(session);
+    const isDragging = draggedSessionId === sessionId;
     return (
       <div
         key={sessionId}
         onClick={() => onSelect(sessionId)}
+        draggable
+        onDragStart={() => handleDragStart(sessionId)}
+        onDragEnd={handleDragEnd}
         className={`p-2.5 rounded cursor-pointer transition-colors border ${
           selectedId === sessionId
             ? "border-zinc-700 bg-zinc-900"
             : "border-transparent hover:bg-zinc-900/50"
-        }`}
+        } ${isDragging ? "opacity-50" : ""}`}
       >
         <div className="flex items-center justify-between">
           {editingId === sessionId ? (
@@ -550,12 +663,21 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
   const renderFolderSection = (folderName: string, folderSessions: SessionInfo[]) => {
     const isCollapsed = collapsedFolders.has(folderName);
     const hasIdleSessions = folderSessions.some((s) => s.activityState === "idle");
+    const isDragOver = dragOverFolder === folderName;
 
     return (
-      <div key={folderName || "__ungrouped"} className="mb-2">
+      <div
+        key={folderName || "__ungrouped"}
+        className="mb-2"
+        onDragOver={(e) => handleDragOver(e, folderName)}
+        onDragLeave={handleDragLeave}
+        onDrop={() => handleDrop(folderName)}
+      >
         {folderName && (
           <div
-            className="flex items-center justify-between px-2 py-1.5 rounded cursor-pointer hover:bg-zinc-900/50 group"
+            className={`flex items-center justify-between px-2 py-1.5 rounded cursor-pointer hover:bg-zinc-900/50 group transition-colors ${
+              isDragOver ? "bg-blue-900/30 border border-blue-700/50" : ""
+            }`}
             onClick={() => toggleFolder(folderName)}
           >
             <div className="flex-1 min-w-0">
@@ -657,6 +779,13 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
           <span className="text-[13px] font-medium text-zinc-100">Sessions</span>
           <div className="flex items-center gap-1">
             <button
+              onClick={() => setShowArchived(!showArchived)}
+              className={`p-1.5 rounded hover:bg-zinc-800 transition-colors ${showArchived ? "bg-zinc-800" : ""}`}
+              title={showArchived ? "Hide History" : "Show History"}
+            >
+              <History className={`w-3.5 h-3.5 ${showArchived ? "text-zinc-100" : "text-zinc-400"}`} />
+            </button>
+            <button
               onClick={() => setShowNewFolder(true)}
               className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
               title="New Folder"
@@ -678,6 +807,25 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
               <Settings className="w-3.5 h-3.5 text-zinc-400" />
             </button>
           </div>
+        </div>
+        {/* Search bar */}
+        <div className="relative mb-3">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" />
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search sessions..."
+            className="h-8 pl-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-zinc-800"
+            >
+              <X className="w-3 h-3 text-zinc-500" />
+            </button>
+          )}
         </div>
         <button
           onClick={() => setShowNewSession(true)}
@@ -701,7 +849,7 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
           <div className="flex items-center justify-center h-32">
             <div className="w-4 h-4 rounded-full border-2 border-zinc-600 border-t-zinc-300 animate-spin" />
           </div>
-        ) : sessions.length === 0 && folders.length === 0 ? (
+        ) : filteredSessions.length === 0 && folders.length === 0 && !searchQuery && !showArchived ? (
           <div className="flex flex-col items-center justify-center h-32 text-center">
             <Terminal className="w-6 h-6 mb-2 text-zinc-600" />
             <p className="text-[12px] text-zinc-400">No sessions yet</p>
@@ -711,8 +859,106 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
           </div>
         ) : (
           <>
+            {/* Search results indicator */}
+            {searchQuery && (
+              <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded bg-zinc-900/50 border border-zinc-800">
+                <Search className="w-3 h-3 text-zinc-500" />
+                <span className="text-[11px] text-zinc-400">
+                  {filteredSessions.length} active{filteredSessions.length !== 1 ? "s" : ""}
+                  {showArchived && `, ${filteredArchivedSessions.length} archived`}
+                </span>
+              </div>
+            )}
+
+            {/* Active sessions */}
             {folders.map((folder) => renderFolderSection(folder, groupedSessions[folder] || []))}
             {renderFolderSection("", groupedSessions[""] || [])}
+
+            {/* Archived sessions */}
+            {showArchived && filteredArchivedSessions.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-zinc-800">
+                <div className="flex items-center justify-between mb-2 px-2">
+                  <div className="flex items-center gap-1.5">
+                    <Archive className="w-3.5 h-3.5 text-zinc-500" />
+                    <span className="text-[12px] font-medium text-zinc-400">History</span>
+                    <span className="text-[10px] px-1 py-0 rounded bg-zinc-800 text-zinc-500">
+                      {filteredArchivedSessions.length}
+                    </span>
+                  </div>
+                  {archivedSessions.length > 0 && (
+                    <button
+                      onClick={() => {
+                        if (confirm("Clear all session history?")) {
+                          clearArchivedSessions();
+                          setArchivedSessionsState([]);
+                        }
+                      }}
+                      className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  {filteredArchivedSessions.map((archived) => (
+                    <div
+                      key={archived.id}
+                      onClick={() => onSelect(archived.id)}
+                      className={`p-2.5 rounded cursor-pointer transition-colors border ${
+                        selectedId === archived.id
+                          ? "border-zinc-700 bg-zinc-900"
+                          : "border-transparent hover:bg-zinc-900/50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" title="Archived" />
+                          <span className="truncate text-[12px] font-medium text-zinc-400">
+                            {archived.name}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">
+                            archived
+                          </span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeArchivedSession(archived.id);
+                            setArchivedSessionsState(getArchivedSessions());
+                          }}
+                          className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-zinc-800"
+                          title="Remove from history"
+                        >
+                          <X className="w-3 h-3 text-zinc-500" />
+                        </button>
+                      </div>
+                      {archived.description && (
+                        <div className="mt-1 text-[11px] text-zinc-600 italic truncate">
+                          {archived.description}
+                        </div>
+                      )}
+                      <div className="mt-1.5 flex items-center justify-between text-[11px] text-zinc-600">
+                        <span className="truncate flex-1">{archived.cwd}</span>
+                        <span className="ml-2 flex-shrink-0">
+                          {new Date(archived.killedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* No results message */}
+            {searchQuery && filteredSessions.length === 0 && (!showArchived || filteredArchivedSessions.length === 0) && (
+              <div className="flex flex-col items-center justify-center h-24 text-center">
+                <Search className="w-5 h-5 mb-2 text-zinc-600" />
+                <p className="text-[12px] text-zinc-400">No sessions found</p>
+                <p className="text-[11px] mt-1 text-zinc-600">
+                  Try a different search term{!showArchived && " or check history"}
+                </p>
+              </div>
+            )}
           </>
         )}
       </ScrollArea>
@@ -914,6 +1160,40 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
                 placeholder="Leave empty for local dev"
                 className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
               />
+            </div>
+
+            {/* Danger Zone */}
+            <div className="border-t border-zinc-800 pt-4 mt-4">
+              <h4 className="text-[12px] font-medium text-red-400 mb-3 flex items-center gap-2">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                Danger Zone
+              </h4>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-red-950/30 rounded border border-red-900/50">
+                  <div>
+                    <p className="text-[12px] text-zinc-200">Kill All Sessions</p>
+                    <p className="text-[10px] text-zinc-500">Terminate all running tmux sessions. Sessions will be archived.</p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={handleKillAll}
+                    disabled={isKillingAll || sessions.length === 0}
+                    className="h-7 px-3 text-[11px] border-red-800 text-red-400 hover:bg-red-950 hover:text-red-300 disabled:opacity-40"
+                  >
+                    {isKillingAll ? (
+                      <>
+                        <div className="w-3 h-3 mr-1.5 rounded-full border-2 border-red-400 border-t-transparent animate-spin" />
+                        Killing...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-3 h-3 mr-1.5" />
+                        Kill All ({sessions.length})
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
             </div>
 
             {/* AI Provider API Keys */}
