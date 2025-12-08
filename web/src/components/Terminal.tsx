@@ -6,7 +6,6 @@ import { FitAddon } from "@xterm/addon-fit";
 import { ChevronDown } from "lucide-react";
 import { getWebSocketUrl, pollOutput, sendInput } from "@/lib/api";
 import type { WebSocketMessage } from "@/lib/types";
-import { Button } from "@/components/ui/button";
 
 interface TerminalProps {
   sessionId: string;
@@ -22,6 +21,31 @@ export interface TerminalHandle {
 const MAX_RECONNECT_ATTEMPTS = 5;
 const INITIAL_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
+
+// Clean malformed escape sequences from terminal output
+// This handles cases where OSC sequences or DA responses get corrupted/truncated
+function cleanTerminalOutput(data: string): string {
+  // Remove orphaned OSC-like sequences without proper ESC prefix
+  // Pattern: ]0; or >0; followed by text until BEL (\x07) or ST (\x1b\\) or end
+  // These appear when the ESC character gets stripped
+  let cleaned = data.replace(/[>\]]0;[^\x07\x1b]*(?:\x07|\x1b\\)?/g, "");
+
+  // Remove corrupted DA (Device Attributes) responses like ">0;276c"
+  // Normal DA response is ESC [ ? ... c, but corrupted ones lose the ESC [
+  cleaned = cleaned.replace(/>[\d;]+c/g, "");
+
+  // Remove orphaned CSI sequences without ESC prefix (starting with [ directly)
+  // But be careful not to remove legitimate bracket content
+  cleaned = cleaned.replace(/(?<!\x1b)\[[\d;]*[A-Za-z]/g, (match) => {
+    // Only remove if it looks like a CSI sequence parameter (numbers and ; only before letter)
+    if (/^\[[\d;]+[A-Za-z]$/.test(match)) {
+      return "";
+    }
+    return match;
+  });
+
+  return cleaned;
+}
 
 export default function Terminal({ sessionId, onExit, onError }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -79,7 +103,7 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
       try {
         const response = await pollOutput(sessionId, offsetRef.current);
         if (response.output) {
-          xtermRef.current?.write(response.output);
+          xtermRef.current?.write(cleanTerminalOutput(response.output));
         }
         offsetRef.current = response.offset;
 
@@ -134,9 +158,13 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
 
       // Send initial resize
       if (fitAddonRef.current && xtermRef.current) {
-        const dims = fitAddonRef.current.proposeDimensions();
-        if (dims) {
-          ws.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
+        try {
+          const dims = fitAddonRef.current.proposeDimensions();
+          if (dims) {
+            ws.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
+          }
+        } catch (e) {
+          console.warn("Failed to send initial resize:", e);
         }
       }
     };
@@ -146,10 +174,10 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
         const msg: WebSocketMessage = JSON.parse(event.data);
         switch (msg.type) {
           case "output":
-            xtermRef.current?.write(msg.data);
+            xtermRef.current?.write(cleanTerminalOutput(msg.data));
             break;
           case "history":
-            xtermRef.current?.write(msg.data);
+            xtermRef.current?.write(cleanTerminalOutput(msg.data));
             // Scroll to bottom after history loads
             setTimeout(() => {
               xtermRef.current?.scrollToBottom();
@@ -222,42 +250,41 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
     if (initializedRef.current || !terminalRef.current) return;
     initializedRef.current = true;
 
-    // Create terminal with phosphor theme
+    // Create terminal with minimal monochrome theme
     const term = new XTerm({
       cursorBlink: true,
-      cursorStyle: "block",
-      fontSize: 14,
-      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      cursorStyle: "bar",
+      fontSize: 12,
+      fontFamily: "'JetBrains Mono', 'SF Mono', 'Fira Code', 'Consolas', monospace",
       fontWeight: "400",
       letterSpacing: 0,
-      lineHeight: 1.2,
-      scrollback: 10000, // Enable scrollback buffer (10k lines)
-      scrollOnUserInput: true, // Auto-scroll when user types
-      // Explicitly allow scrolling - don't let mouse reporting capture scroll events
+      lineHeight: 1.3,
+      scrollback: 10000,
+      scrollOnUserInput: true,
       allowProposedApi: true,
       theme: {
-        background: "#050508",
-        foreground: "#E8ECF4",
-        cursor: "#39FF14",
-        cursorAccent: "#050508",
-        selectionBackground: "rgba(57, 255, 20, 0.2)",
-        selectionForeground: "#E8ECF4",
-        black: "#1a1a1f",
-        red: "#FF3366",
-        green: "#39FF14",
-        yellow: "#FFB800",
-        blue: "#00D4FF",
-        magenta: "#C084FC",
-        cyan: "#00D4FF",
-        white: "#E8ECF4",
-        brightBlack: "#4a4a55",
-        brightRed: "#FF6B8A",
-        brightGreen: "#6BFF4D",
-        brightYellow: "#FFD54F",
-        brightBlue: "#4DE8FF",
-        brightMagenta: "#D4A5FF",
-        brightCyan: "#4DE8FF",
-        brightWhite: "#FFFFFF",
+        background: "#09090b", // zinc-950
+        foreground: "#e4e4e7", // zinc-200
+        cursor: "#a1a1aa", // zinc-400
+        cursorAccent: "#09090b",
+        selectionBackground: "rgba(161, 161, 170, 0.25)", // zinc-400 with opacity
+        selectionForeground: "#fafafa", // zinc-50
+        black: "#18181b", // zinc-900
+        red: "#f87171", // red-400
+        green: "#4ade80", // green-400
+        yellow: "#facc15", // yellow-400
+        blue: "#60a5fa", // blue-400
+        magenta: "#c084fc", // purple-400
+        cyan: "#22d3ee", // cyan-400
+        white: "#e4e4e7", // zinc-200
+        brightBlack: "#52525b", // zinc-600
+        brightRed: "#fca5a5", // red-300
+        brightGreen: "#86efac", // green-300
+        brightYellow: "#fde047", // yellow-300
+        brightBlue: "#93c5fd", // blue-300
+        brightMagenta: "#d8b4fe", // purple-300
+        brightCyan: "#67e8f9", // cyan-300
+        brightWhite: "#fafafa", // zinc-50
       },
     });
 
@@ -265,80 +292,77 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
     term.loadAddon(fitAddon);
 
     term.open(terminalRef.current);
-    fitAddon.fit();
 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Fix: Ensure wheel scrolling always works
-    // xterm.js mouse reporting can capture wheel events, breaking scrolling
-    // We intercept wheel events and use xterm's scrollLines API directly
+    // Delay fit() to ensure DOM is ready and has dimensions
+    // This prevents "Cannot read properties of undefined (reading 'dimensions')" errors
+    requestAnimationFrame(() => {
+      if (terminalRef.current && terminalRef.current.offsetWidth > 0 && terminalRef.current.offsetHeight > 0) {
+        try {
+          fitAddon.fit();
+        } catch (e) {
+          console.warn("Terminal fit failed, will retry on resize:", e);
+        }
+      }
+    });
+
+    // Smooth scrolling for terminal viewport
     const termElement = terminalRef.current;
+    const viewport = termElement.querySelector('.xterm-viewport') as HTMLElement;
 
+    // Apply smooth scroll CSS to the viewport
+    if (viewport) {
+      viewport.style.scrollBehavior = 'auto'; // Use auto for immediate response, CSS handles smoothing
+    }
+
+    // Custom wheel handler for smooth scrolling
+    // xterm's default wheel handling can be janky, so we use viewport scrollTop directly
     const handleWheel = (e: WheelEvent) => {
-      // Always handle wheel events for scrolling
-      // Calculate lines to scroll based on deltaY
-      // deltaMode: 0 = pixels, 1 = lines, 2 = pages
-      let lines: number;
+      if (!viewport) return;
+
+      // Get scroll amount in pixels
+      let deltaY = e.deltaY;
       if (e.deltaMode === 1) {
-        // Already in lines
-        lines = e.deltaY;
+        // Lines to pixels (roughly 20px per line)
+        deltaY *= 20;
       } else if (e.deltaMode === 2) {
-        // Pages - convert to ~20 lines per page
-        lines = e.deltaY * 20;
-      } else {
-        // Pixels - convert to lines (roughly 20 pixels per line)
-        lines = Math.round(e.deltaY / 20);
+        // Pages to pixels
+        deltaY *= viewport.clientHeight;
       }
 
-      // Clamp to reasonable range and ensure at least 1 line movement
-      if (lines !== 0) {
-        lines = Math.sign(lines) * Math.max(1, Math.min(Math.abs(lines), 10));
-      }
+      // Apply scroll directly to viewport for smooth scrolling
+      viewport.scrollTop += deltaY;
 
-      if (lines !== 0) {
-        term.scrollLines(lines);
-        e.preventDefault();
-        e.stopPropagation();
-      }
+      e.preventDefault();
+      e.stopPropagation();
     };
 
-    // Add wheel handler with high priority (capture phase)
+    // Add wheel handler
     termElement.addEventListener('wheel', handleWheel, { capture: true, passive: false });
 
-    // Mobile touch scrolling fix
-    // xterm.js captures touch events which prevents native scrolling on mobile
-    const viewport = termElement.querySelector('.xterm-viewport') as HTMLElement;
+    // Mobile touch scrolling
     let touchStartY = 0;
-    let isTouchScrolling = false;
+    let lastTouchY = 0;
 
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 1) {
         touchStartY = e.touches[0].clientY;
-        isTouchScrolling = false;
+        lastTouchY = touchStartY;
       }
     };
 
     const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 1) {
-        const touchY = e.touches[0].clientY;
-        const deltaY = touchStartY - touchY;
+      if (!viewport || e.touches.length !== 1) return;
 
-        // Only start scrolling after a small threshold to avoid accidental scrolls
-        if (!isTouchScrolling && Math.abs(deltaY) > 5) {
-          isTouchScrolling = true;
-        }
+      const touchY = e.touches[0].clientY;
+      const deltaY = lastTouchY - touchY;
+      lastTouchY = touchY;
 
-        if (isTouchScrolling) {
-          // Convert pixel delta to lines (roughly 20 pixels per line)
-          const lines = Math.round(deltaY / 20);
-          if (lines !== 0) {
-            term.scrollLines(lines);
-            touchStartY = touchY; // Reset for continuous scrolling
-            e.preventDefault();
-          }
-        }
-      }
+      // Apply scroll directly
+      viewport.scrollTop += deltaY;
+      e.preventDefault();
     };
 
     termElement.addEventListener('touchstart', handleTouchStart, { passive: true });
@@ -349,31 +373,45 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
       termElement.removeEventListener('wheel', handleWheel, { capture: true } as EventListenerOptions);
       termElement.removeEventListener('touchstart', handleTouchStart);
       termElement.removeEventListener('touchmove', handleTouchMove);
+      if (viewport) {
+        viewport.removeEventListener('scroll', handleViewportScroll);
+      }
+      if (scrollButtonTimeout) {
+        clearTimeout(scrollButtonTimeout);
+      }
+      if (writeTimeout) {
+        clearTimeout(writeTimeout);
+      }
     };
 
     // Track scroll position to show/hide scroll button
-    // Use throttling to prevent excessive state updates during rapid scrolling
-    term.onScroll(() => {
-      const now = Date.now();
-      // Throttle scroll checks to every 100ms
-      if (now - lastScrollCheckRef.current < 100) return;
-      lastScrollCheckRef.current = now;
+    // Use a simple scroll event listener on the viewport instead of xterm's onScroll
+    let scrollButtonTimeout: ReturnType<typeof setTimeout> | null = null;
 
+    const updateScrollButton = () => {
       const isAtBottom = checkIfAtBottom();
       setShowScrollButton(!isAtBottom);
-    });
+    };
 
-    // Also check scroll position when new content is written
-    // This ensures the button shows up when output pushes content out of view
+    const handleViewportScroll = () => {
+      // Debounce scroll button updates to reduce state churn
+      if (scrollButtonTimeout) {
+        clearTimeout(scrollButtonTimeout);
+      }
+      scrollButtonTimeout = setTimeout(updateScrollButton, 150);
+    };
+
+    if (viewport) {
+      viewport.addEventListener('scroll', handleViewportScroll, { passive: true });
+    }
+
+    // Check scroll position when new content is written (debounced)
+    let writeTimeout: ReturnType<typeof setTimeout> | null = null;
     term.onWriteParsed(() => {
-      // Only check if we weren't already showing the button
-      // and debounce to avoid excessive checks
-      const now = Date.now();
-      if (now - lastScrollCheckRef.current < 50) return;
-      lastScrollCheckRef.current = now;
-
-      const isAtBottom = checkIfAtBottom();
-      setShowScrollButton(!isAtBottom);
+      if (writeTimeout) {
+        clearTimeout(writeTimeout);
+      }
+      writeTimeout = setTimeout(updateScrollButton, 200);
     });
 
     // Handle input - use WebSocket if available, otherwise HTTP
@@ -390,12 +428,20 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
 
     // Handle resize
     const handleResize = () => {
-      fitAddon.fit();
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        const dims = fitAddon.proposeDimensions();
-        if (dims) {
-          wsRef.current.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
+      // Only fit if terminal has dimensions
+      if (!terminalRef.current || terminalRef.current.offsetWidth === 0 || terminalRef.current.offsetHeight === 0) {
+        return;
+      }
+      try {
+        fitAddon.fit();
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          const dims = fitAddon.proposeDimensions();
+          if (dims) {
+            wsRef.current.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
+          }
         }
+      } catch (e) {
+        console.warn("Resize failed:", e);
       }
     };
 
@@ -433,14 +479,12 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
       />
       {/* Scroll to bottom button */}
       {showScrollButton && (
-        <Button
+        <button
           onClick={scrollToBottom}
-          size="icon"
-          variant="secondary"
-          className="absolute bottom-4 right-4 h-10 w-10 rounded-full shadow-lg bg-primary/90 hover:bg-primary text-primary-foreground border border-primary/50 z-10"
+          className="absolute bottom-3 right-3 h-7 w-7 rounded-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 flex items-center justify-center transition-colors z-10"
         >
-          <ChevronDown className="w-5 h-5" />
-        </Button>
+          <ChevronDown className="w-4 h-4 text-zinc-300" />
+        </button>
       )}
     </div>
   );

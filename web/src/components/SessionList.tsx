@@ -16,7 +16,6 @@ import {
   ChevronRight,
   ChevronDown,
   MoreVertical,
-  Zap,
   Star,
   Clock,
   FileCode,
@@ -51,7 +50,6 @@ import { getSessionId } from "@/lib/types";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
@@ -73,7 +71,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Card } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface SessionListProps {
   selectedId: string | null;
@@ -82,9 +86,9 @@ interface SessionListProps {
 
 function ActivityIndicator({ state }: { state?: ActivityState }) {
   const stateColors = {
-    idle: "bg-primary shadow-[0_0_8px_var(--primary)]",
-    busy: "bg-amber-500 shadow-[0_0_8px_theme(colors.amber.500)] animate-pulse",
-    exited: "bg-muted-foreground/50",
+    idle: "bg-emerald-500",
+    busy: "bg-amber-500 animate-pulse",
+    exited: "bg-zinc-600",
   };
 
   const stateLabels = {
@@ -97,7 +101,7 @@ function ActivityIndicator({ state }: { state?: ActivityState }) {
 
   return (
     <div
-      className={`w-2 h-2 rounded-full transition-all ${stateColors[currentState]}`}
+      className={`w-1.5 h-1.5 rounded-full ${stateColors[currentState]}`}
       title={stateLabels[currentState]}
     />
   );
@@ -123,6 +127,8 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
   const [showSettings, setShowSettings] = useState(false);
   const [apiUrl, setApiUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [openaiApiKey, setOpenaiApiKey] = useState("");
+  const [geminiApiKey, setGeminiApiKey] = useState("");
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   // Directory picker state
@@ -166,8 +172,12 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
     setFoldersState(getFoldersList());
     const storedUrl = localStorage.getItem("terminalApiUrl");
     const storedKey = localStorage.getItem("terminalApiKey");
+    const storedOpenaiKey = localStorage.getItem("openaiApiKey");
+    const storedGeminiKey = localStorage.getItem("geminiApiKey");
     setApiUrl(storedUrl || getDefaultApiUrl());
     setApiKey(storedKey ?? getDefaultApiKey());
+    setOpenaiApiKey(storedOpenaiKey || "");
+    setGeminiApiKey(storedGeminiKey || "");
     setLocalStorageLoaded(true);
     fetchSessions();
 
@@ -199,8 +209,10 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
       const session = await createSession(newSessionConfig);
       const sessionId = getSessionId(session);
       setSessions((prev) => [...prev, session]);
-      if (newSessionFolder) {
-        setSessionFolder(sessionId, newSessionFolder);
+      // Handle folder assignment (empty string or "__none__" means no folder)
+      const folderToAssign = newSessionFolder && newSessionFolder !== "__none__" ? newSessionFolder : "";
+      if (folderToAssign) {
+        setSessionFolder(sessionId, folderToAssign);
         setSessionFoldersState(getSessionFolders());
       }
       // Add directory to recent list
@@ -321,6 +333,8 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
   const saveSettings = () => {
     localStorage.setItem("terminalApiUrl", apiUrl);
     localStorage.setItem("terminalApiKey", apiKey);
+    localStorage.setItem("openaiApiKey", openaiApiKey);
+    localStorage.setItem("geminiApiKey", geminiApiKey);
     setShowSettings(false);
     fetchSessions();
   };
@@ -410,13 +424,13 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
   const renderSession = (session: SessionInfo) => {
     const sessionId = getSessionId(session);
     return (
-      <Card
+      <div
         key={sessionId}
         onClick={() => onSelect(sessionId)}
-        className={`p-3 cursor-pointer transition-all hover:bg-accent/50 border-border/50 ${
+        className={`p-2.5 rounded cursor-pointer transition-colors border ${
           selectedId === sessionId
-            ? "border-primary/50 bg-accent/30 shadow-[0_0_15px_rgba(57,255,20,0.1)]"
-            : "hover:border-border"
+            ? "border-zinc-700 bg-zinc-900"
+            : "border-transparent hover:bg-zinc-900/50"
         }`}
       >
         <div className="flex items-center justify-between">
@@ -430,35 +444,31 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
                   if (e.key === "Enter") saveRename(sessionId);
                   if (e.key === "Escape") cancelRename();
                 }}
-                className="flex-1 h-8 text-sm"
+                className="flex-1 h-7 text-[12px] bg-zinc-900 border-zinc-700"
                 autoFocus
               />
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-7 w-7"
+              <button
+                className="p-1 rounded hover:bg-zinc-800"
                 onClick={() => saveRename(sessionId)}
               >
-                <Check className="w-4 h-4 text-primary" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-7 w-7"
+                <Check className="w-3.5 h-3.5 text-emerald-500" />
+              </button>
+              <button
+                className="p-1 rounded hover:bg-zinc-800"
                 onClick={cancelRename}
               >
-                <X className="w-4 h-4 text-destructive" />
-              </Button>
+                <X className="w-3.5 h-3.5 text-red-400" />
+              </button>
             </div>
           ) : (
             <>
-              <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
                 <ActivityIndicator state={session.activityState} />
-                <span className="truncate text-sm font-medium">
+                <span className="truncate text-[12px] font-medium text-zinc-200">
                   {getDisplayName(session)}
                 </span>
                 {session.source === "local" && session.attached && (
-                  <Badge variant="outline" className="text-xs px-1.5 py-0">attached</Badge>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">attached</span>
                 )}
               </div>
               <div
@@ -467,26 +477,26 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
               >
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button size="icon" variant="ghost" className="h-7 w-7">
-                      <MoreVertical className="w-3.5 h-3.5" />
-                    </Button>
+                    <button className="p-1 rounded hover:bg-zinc-800">
+                      <MoreVertical className="w-3.5 h-3.5 text-zinc-500" />
+                    </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
-                    <DropdownMenuItem onClick={() => handleRename(sessionId, sessionNames[sessionId] || "")}>
-                      <Pencil className="w-3.5 h-3.5 mr-2" />
+                  <DropdownMenuContent align="end" className="w-44 bg-zinc-900 border-zinc-800">
+                    <DropdownMenuItem onClick={() => handleRename(sessionId, sessionNames[sessionId] || "")} className="text-[12px]">
+                      <Pencil className="w-3 h-3 mr-2" />
                       Rename
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleEditDescription("session", sessionId)}>
-                      <Pencil className="w-3.5 h-3.5 mr-2" />
+                    <DropdownMenuItem onClick={() => handleEditDescription("session", sessionId)} className="text-[12px]">
+                      <Pencil className="w-3 h-3 mr-2" />
                       {sessionDescriptions[sessionId] ? "Edit Description" : "Add Description"}
                     </DropdownMenuItem>
                     {folders.length > 0 && (
                       <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuLabel>Move to folder</DropdownMenuLabel>
+                        <DropdownMenuSeparator className="bg-zinc-800" />
+                        <DropdownMenuLabel className="text-[11px] text-zinc-500">Move to folder</DropdownMenuLabel>
                         <DropdownMenuItem
                           onClick={() => handleMoveToFolder(sessionId, "")}
-                          className={!sessionFolders[sessionId] ? "text-primary" : ""}
+                          className={`text-[12px] ${!sessionFolders[sessionId] ? "text-zinc-100" : ""}`}
                         >
                           (No folder)
                         </DropdownMenuItem>
@@ -494,19 +504,19 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
                           <DropdownMenuItem
                             key={folder}
                             onClick={() => handleMoveToFolder(sessionId, folder)}
-                            className={sessionFolders[sessionId] === folder ? "text-primary" : ""}
+                            className={`text-[12px] ${sessionFolders[sessionId] === folder ? "text-zinc-100" : ""}`}
                           >
                             {folder}
                           </DropdownMenuItem>
                         ))}
                       </>
                     )}
-                    <DropdownMenuSeparator />
+                    <DropdownMenuSeparator className="bg-zinc-800" />
                     <DropdownMenuItem
                       onClick={() => handleKill(sessionId)}
-                      className="text-destructive focus:text-destructive"
+                      className="text-[12px] text-red-400 focus:text-red-400"
                     >
-                      <Trash2 className="w-3.5 h-3.5 mr-2" />
+                      <Trash2 className="w-3 h-3 mr-2" />
                       Kill Session
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -516,37 +526,24 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
           )}
         </div>
         {sessionDescriptions[sessionId] && (
-          <div className="mt-1 text-xs text-muted-foreground/70 italic truncate">
+          <div className="mt-1 text-[11px] text-zinc-500 italic truncate">
             {sessionDescriptions[sessionId]}
           </div>
         )}
-        <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+        <div className="mt-1.5 flex items-center justify-between text-[11px] text-zinc-500">
           <span className="truncate flex-1">{session.cwd}</span>
           <div className="ml-2 flex-shrink-0 flex items-center gap-2">
             {(() => {
               const metrics = formatMetrics(session.metrics);
               if (metrics) {
-                return (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="text-muted-foreground/60">{metrics.lines}L / {metrics.tokens}t</span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <div className="text-xs">
-                        <div>{session.metrics?.lineCount?.toLocaleString()} lines</div>
-                        <div>{session.metrics?.charCount?.toLocaleString()} chars</div>
-                        <div>~{session.metrics?.estimatedTokens?.toLocaleString()} tokens</div>
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
-                );
+                return <span className="text-zinc-600">{metrics.lines}L / {metrics.tokens}t</span>;
               }
               return null;
             })()}
             <span>{formatTime(session.lastActivity)}</span>
           </div>
         </div>
-      </Card>
+      </div>
     );
   };
 
@@ -555,44 +552,44 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
     const hasIdleSessions = folderSessions.some((s) => s.activityState === "idle");
 
     return (
-      <div key={folderName || "__ungrouped"} className="mb-3">
+      <div key={folderName || "__ungrouped"} className="mb-2">
         {folderName && (
           <div
-            className="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer hover:bg-accent/30 group"
+            className="flex items-center justify-between px-2 py-1.5 rounded cursor-pointer hover:bg-zinc-900/50 group"
             onClick={() => toggleFolder(folderName)}
           >
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 {isCollapsed ? (
-                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                  <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
                 ) : (
-                  <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                  <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />
                 )}
                 {isCollapsed ? (
-                  <Folder className="w-4 h-4 text-primary/70" />
+                  <Folder className="w-3.5 h-3.5 text-zinc-400" />
                 ) : (
-                  <FolderOpen className="w-4 h-4 text-primary" />
+                  <FolderOpen className="w-3.5 h-3.5 text-zinc-300" />
                 )}
-                <span className="text-sm font-medium">{folderName}</span>
-                <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                <span className="text-[12px] font-medium text-zinc-200">{folderName}</span>
+                <span className="text-[10px] px-1 py-0 rounded bg-zinc-800 text-zinc-500">
                   {folderSessions.length}
-                </Badge>
+                </span>
                 {folderDocFiles[folderName] && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <div className="flex items-center">
-                        <FileCode className="w-3 h-3 text-muted-foreground" />
+                        <FileCode className="w-3 h-3 text-zinc-600" />
                       </div>
                     </TooltipTrigger>
-                    <TooltipContent>{folderDocFiles[folderName]}</TooltipContent>
+                    <TooltipContent className="bg-zinc-900 border-zinc-800 text-[11px]">{folderDocFiles[folderName]}</TooltipContent>
                   </Tooltip>
                 )}
                 {hasIdleSessions && isCollapsed && (
-                  <div className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_6px_var(--primary)]" />
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 )}
               </div>
               {folderDescriptions[folderName] && (
-                <div className="ml-10 text-xs text-muted-foreground/70 italic truncate">
+                <div className="ml-8 text-[11px] text-zinc-500 italic truncate">
                   {folderDescriptions[folderName]}
                 </div>
               )}
@@ -600,34 +597,30 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
             <div onClick={(e) => e.stopPropagation()}>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <MoreVertical className="w-3.5 h-3.5" />
-                  </Button>
+                  <button className="p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-zinc-800">
+                    <MoreVertical className="w-3.5 h-3.5 text-zinc-500" />
+                  </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => handleCreateInFolder(folderName)}>
-                    <Plus className="w-3.5 h-3.5 mr-2" />
+                <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-800">
+                  <DropdownMenuItem onClick={() => handleCreateInFolder(folderName)} className="text-[12px]">
+                    <Plus className="w-3 h-3 mr-2" />
                     New Terminal
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => handleEditDescription("folder", folderName)}>
-                    <Pencil className="w-3.5 h-3.5 mr-2" />
+                  <DropdownMenuSeparator className="bg-zinc-800" />
+                  <DropdownMenuItem onClick={() => handleEditDescription("folder", folderName)} className="text-[12px]">
+                    <Pencil className="w-3 h-3 mr-2" />
                     {folderDescriptions[folderName] ? "Edit Description" : "Add Description"}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleEditDocFile(folderName)}>
-                    <FileCode className="w-3.5 h-3.5 mr-2" />
+                  <DropdownMenuItem onClick={() => handleEditDocFile(folderName)} className="text-[12px]">
+                    <FileCode className="w-3 h-3 mr-2" />
                     {folderDocFiles[folderName] ? "Edit Doc File" : "Set Doc File"}
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
+                  <DropdownMenuSeparator className="bg-zinc-800" />
                   <DropdownMenuItem
                     onClick={() => handleDeleteFolder(folderName)}
-                    className="text-destructive focus:text-destructive"
+                    className="text-[12px] text-red-400 focus:text-red-400"
                   >
-                    <Trash2 className="w-3.5 h-3.5 mr-2" />
+                    <Trash2 className="w-3 h-3 mr-2" />
                     Delete folder
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -636,10 +629,10 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
           </div>
         )}
         {(!folderName || !isCollapsed) && (
-          <div className={`space-y-2 ${folderName ? "ml-6 mt-2" : ""}`}>
+          <div className={`space-y-1 ${folderName ? "ml-5 mt-1" : ""}`}>
             {folderSessions.length === 0 ? (
               !folderName && sessions.length > 0 ? null : (
-                <p className="px-3 py-4 text-xs italic text-muted-foreground">
+                <p className="px-2 py-3 text-[11px] italic text-zinc-600">
                   {folderName ? "No sessions in this folder" : "No ungrouped sessions"}
                 </p>
               )
@@ -657,70 +650,62 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
   };
 
   return (
-    <div className="h-full w-full flex flex-col bg-background md:bg-card/30 backdrop-blur-sm border-r border-border/50">
+    <div className="h-full w-full flex flex-col bg-black">
       {/* Header */}
-      <div className="p-5 border-b border-border/50">
-        {/* Brand */}
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-center shadow-[0_0_15px_rgba(57,255,20,0.2)]">
-            <Zap className="w-5 h-5 text-primary" />
-          </div>
-          <div className="text-lg font-semibold tracking-tight">
-            Cloud<span className="text-primary">Terminal</span>
+      <div className="px-3 py-3 border-b border-zinc-800">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[13px] font-medium text-zinc-100">Sessions</span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setShowNewFolder(true)}
+              className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
+              title="New Folder"
+            >
+              <FolderPlus className="w-3.5 h-3.5 text-zinc-400" />
+            </button>
+            <button
+              onClick={fetchSessions}
+              className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
+              title="Refresh"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
+            </button>
+            <button
+              onClick={() => setShowSettings(true)}
+              className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
+              title="Settings"
+            >
+              <Settings className="w-3.5 h-3.5 text-zinc-400" />
+            </button>
           </div>
         </div>
-
-        {/* Action buttons */}
-        <div className="flex gap-2">
-          <Button onClick={() => setShowNewSession(true)} className="flex-1">
-            <Plus className="w-4 h-4 mr-2" />
-            New Session
-          </Button>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button size="icon" variant="outline" onClick={() => setShowNewFolder(true)}>
-                <FolderPlus className="w-4 h-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>New Folder</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button size="icon" variant="outline" onClick={fetchSessions}>
-                <RefreshCw className="w-4 h-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Refresh</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button size="icon" variant="outline" onClick={() => setShowSettings(true)}>
-                <Settings className="w-4 h-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Settings</TooltipContent>
-          </Tooltip>
-        </div>
+        <button
+          onClick={() => setShowNewSession(true)}
+          className="w-full flex items-center justify-center gap-1.5 h-8 text-[12px] rounded border border-zinc-800 hover:bg-zinc-800 transition-colors text-zinc-300"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          New Session
+        </button>
       </div>
 
       {/* Error */}
       {error && (
-        <div className="px-5 py-3 text-sm bg-destructive/10 text-destructive border-b border-destructive/20">
+        <div className="px-3 py-2 text-[12px] text-red-400 bg-red-950/50 border-b border-zinc-800">
           {error}
         </div>
       )}
 
       {/* Session List */}
-      <ScrollArea className="flex-1 p-4">
+      <ScrollArea className="flex-1 px-3 py-2">
         {loading || !localStorageLoaded ? (
           <div className="flex items-center justify-center h-32">
-            <div className="w-5 h-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+            <div className="w-4 h-4 rounded-full border-2 border-zinc-600 border-t-zinc-300 animate-spin" />
           </div>
         ) : sessions.length === 0 && folders.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-center">
-            <Terminal className="w-8 h-8 mb-3 text-muted-foreground" />
-            <p className="text-sm text-foreground/80">No sessions yet</p>
-            <p className="text-xs mt-1 text-muted-foreground">
+            <Terminal className="w-6 h-6 mb-2 text-zinc-600" />
+            <p className="text-[12px] text-zinc-400">No sessions yet</p>
+            <p className="text-[11px] mt-1 text-zinc-600">
               Create a new session to get started
             </p>
           </div>
@@ -734,13 +719,13 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
 
       {/* New Session Dialog */}
       <Dialog open={showNewSession} onOpenChange={setShowNewSession}>
-        <DialogContent>
+        <DialogContent className="bg-zinc-950 border-zinc-800">
           <DialogHeader>
-            <DialogTitle>New Session</DialogTitle>
+            <DialogTitle className="text-[14px] font-medium text-zinc-100">New Session</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
                 Command
               </label>
               <Input
@@ -750,24 +735,23 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
                   setNewSessionConfig((prev) => ({ ...prev, command: e.target.value }))
                 }
                 placeholder="zsh"
+                className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
               />
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
                   Working Directory
                 </label>
-                <Button
+                <button
                   type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 text-xs"
+                  className="h-6 px-2 text-[11px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 disabled:opacity-40"
                   onClick={handleSaveCurrentDirectory}
                   disabled={!newSessionConfig.cwd || savedDirectories.includes(newSessionConfig.cwd)}
                 >
-                  <Star className="w-3 h-3 mr-1" />
+                  <Star className="w-3 h-3" />
                   Save
-                </Button>
+                </button>
               </div>
               <Input
                 type="text"
@@ -776,34 +760,31 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
                   setNewSessionConfig((prev) => ({ ...prev, cwd: e.target.value }))
                 }
                 placeholder="/home/user"
+                className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
               />
               {/* Saved directories */}
               {savedDirectories.length > 0 && (
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <span className="text-[11px] text-zinc-500 flex items-center gap-1">
                     <Star className="w-3 h-3" /> Saved
                   </span>
                   <div className="flex flex-wrap gap-1">
                     {savedDirectories.map((dir) => (
                       <div key={dir} className="group flex items-center">
-                        <Button
+                        <button
                           type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-6 px-2 text-xs font-mono"
+                          className="h-6 px-2 text-[11px] font-mono border border-zinc-800 rounded hover:bg-zinc-800 text-zinc-400"
                           onClick={() => handleSelectDirectory(dir)}
                         >
                           {dir.split("/").pop() || dir}
-                        </Button>
-                        <Button
+                        </button>
+                        <button
                           type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-zinc-500 hover:text-zinc-300"
                           onClick={() => handleRemoveSavedDirectory(dir)}
                         >
                           <X className="w-3 h-3" />
-                        </Button>
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -812,21 +793,19 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
               {/* Recent directories */}
               {recentDirectories.length > 0 && (
                 <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <span className="text-[11px] text-zinc-500 flex items-center gap-1">
                     <Clock className="w-3 h-3" /> Recent
                   </span>
                   <div className="flex flex-wrap gap-1">
                     {recentDirectories.slice(0, 5).map((dir) => (
-                      <Button
+                      <button
                         key={dir}
                         type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-6 px-2 text-xs font-mono"
+                        className="h-6 px-2 text-[11px] font-mono border border-zinc-800 rounded hover:bg-zinc-800 text-zinc-400"
                         onClick={() => handleSelectDirectory(dir)}
                       >
                         {dir.split("/").pop() || dir}
-                      </Button>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -834,30 +813,30 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
             </div>
             {folders.length > 0 && (
               <div className="space-y-2">
-                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
                   Folder
                 </label>
-                <select
-                  value={newSessionFolder}
-                  onChange={(e) => setNewSessionFolder(e.target.value)}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  <option value="">(No folder)</option>
-                  {folders.map((folder) => (
-                    <option key={folder} value={folder}>
-                      {folder}
-                    </option>
-                  ))}
-                </select>
+                <Select value={newSessionFolder} onValueChange={setNewSessionFolder}>
+                  <SelectTrigger className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-300">
+                    <SelectValue placeholder="(No folder)" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-900 border-zinc-800">
+                    <SelectItem value="__none__" className="text-[12px]">(No folder)</SelectItem>
+                    {folders.map((folder) => (
+                      <SelectItem key={folder} value={folder} className="text-[12px]">
+                        {folder}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowNewSession(false)}>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowNewSession(false)} className="h-8 text-[12px] border-zinc-800 text-zinc-300 hover:bg-zinc-900">
               Cancel
             </Button>
-            <Button onClick={handleCreate}>
-              <Zap className="w-4 h-4 mr-2" />
+            <Button onClick={handleCreate} className="h-8 text-[12px] bg-zinc-100 text-zinc-900 hover:bg-white">
               Create
             </Button>
           </DialogFooter>
@@ -866,13 +845,13 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
 
       {/* New Folder Dialog */}
       <Dialog open={showNewFolder} onOpenChange={setShowNewFolder}>
-        <DialogContent>
+        <DialogContent className="bg-zinc-950 border-zinc-800">
           <DialogHeader>
-            <DialogTitle>New Folder</DialogTitle>
+            <DialogTitle className="text-[14px] font-medium text-zinc-100">New Folder</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
+          <div className="py-2">
             <div className="space-y-2">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
                 Folder Name
               </label>
               <Input
@@ -884,34 +863,36 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
                   if (e.key === "Escape") setShowNewFolder(false);
                 }}
                 placeholder="My Project"
+                className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
                 autoFocus
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button
               variant="outline"
               onClick={() => {
                 setShowNewFolder(false);
                 setNewFolderName("");
               }}
+              className="h-8 text-[12px] border-zinc-800 text-zinc-300 hover:bg-zinc-900"
             >
               Cancel
             </Button>
-            <Button onClick={handleCreateFolder}>Create</Button>
+            <Button onClick={handleCreateFolder} className="h-8 text-[12px] bg-zinc-100 text-zinc-900 hover:bg-white">Create</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Settings Dialog */}
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto bg-zinc-950 border-zinc-800">
           <DialogHeader>
-            <DialogTitle>Settings</DialogTitle>
+            <DialogTitle className="text-[14px] font-medium text-zinc-100">Settings</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
                 API URL
               </label>
               <Input
@@ -919,10 +900,11 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
                 value={apiUrl}
                 onChange={(e) => setApiUrl(e.target.value)}
                 placeholder="http://localhost:3000"
+                className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
               />
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
                 API Key (optional)
               </label>
               <Input
@@ -930,101 +912,135 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="Leave empty for local dev"
+                className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
               />
             </div>
 
+            {/* AI Provider API Keys */}
+            <div className="border-t border-zinc-800 pt-4 mt-4">
+              <h4 className="text-[12px] font-medium text-zinc-300 mb-3">AI Provider API Keys</h4>
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                    OpenAI API Key
+                  </label>
+                  <Input
+                    type="password"
+                    value={openaiApiKey}
+                    onChange={(e) => setOpenaiApiKey(e.target.value)}
+                    placeholder="sk-..."
+                    className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
+                  />
+                  <p className="text-[10px] text-zinc-600">Used for Whisper transcription and other OpenAI features</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                    Google Gemini API Key
+                  </label>
+                  <Input
+                    type="password"
+                    value={geminiApiKey}
+                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                    placeholder="AIza..."
+                    className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
+                  />
+                  <p className="text-[10px] text-zinc-600">Used for Gemini-powered features</p>
+                </div>
+              </div>
+            </div>
+
             {/* API Documentation */}
-            <div className="border-t border-border pt-4 mt-4">
-              <h4 className="text-sm font-medium mb-3">API Reference</h4>
-              <div className="space-y-3 text-xs text-muted-foreground font-mono">
-                <div className="bg-muted/30 rounded-md p-3 space-y-2">
+            <div className="border-t border-zinc-800 pt-4 mt-4">
+              <h4 className="text-[12px] font-medium text-zinc-300 mb-3">API Reference</h4>
+              <div className="space-y-2 text-[11px] text-zinc-400 font-mono">
+                <div className="bg-zinc-900 rounded p-2.5 space-y-1">
                   <div className="flex justify-between">
-                    <span className="text-primary">GET</span>
+                    <span className="text-zinc-300">GET</span>
                     <span>/api/sessions</span>
                   </div>
-                  <p className="text-muted-foreground/70">List all sessions</p>
+                  <p className="text-zinc-600">List all sessions</p>
                 </div>
 
-                <div className="bg-muted/30 rounded-md p-3 space-y-2">
+                <div className="bg-zinc-900 rounded p-2.5 space-y-1">
                   <div className="flex justify-between">
-                    <span className="text-green-400">POST</span>
+                    <span className="text-emerald-500">POST</span>
                     <span>/api/sessions</span>
                   </div>
-                  <p className="text-muted-foreground/70">Create a new session</p>
-                  <pre className="text-xs overflow-x-auto">{"{ command, cwd?, cols?, rows? }"}</pre>
+                  <p className="text-zinc-600">Create a new session</p>
+                  <pre className="text-[10px] overflow-x-auto text-zinc-500">{"{ command, cwd?, cols?, rows? }"}</pre>
                 </div>
 
-                <div className="bg-muted/30 rounded-md p-3 space-y-2">
+                <div className="bg-zinc-900 rounded p-2.5 space-y-1">
                   <div className="flex justify-between">
-                    <span className="text-primary">GET</span>
+                    <span className="text-zinc-300">GET</span>
                     <span>/api/sessions/:id</span>
                   </div>
-                  <p className="text-muted-foreground/70">Get session details + output</p>
+                  <p className="text-zinc-600">Get session details + output</p>
                 </div>
 
-                <div className="bg-muted/30 rounded-md p-3 space-y-2">
+                <div className="bg-zinc-900 rounded p-2.5 space-y-1">
                   <div className="flex justify-between">
-                    <span className="text-green-400">POST</span>
+                    <span className="text-emerald-500">POST</span>
                     <span>/api/sessions/:id/send</span>
                   </div>
-                  <p className="text-muted-foreground/70">Send input to session</p>
-                  <pre className="text-xs overflow-x-auto">{"{ input: string }"}</pre>
+                  <p className="text-zinc-600">Send input to session</p>
+                  <pre className="text-[10px] overflow-x-auto text-zinc-500">{"{ input: string }"}</pre>
                 </div>
 
-                <div className="bg-muted/30 rounded-md p-3 space-y-2">
+                <div className="bg-zinc-900 rounded p-2.5 space-y-1">
                   <div className="flex justify-between">
-                    <span className="text-primary">GET</span>
+                    <span className="text-zinc-300">GET</span>
                     <span>/api/sessions/:id/history</span>
                   </div>
-                  <p className="text-muted-foreground/70">Capture terminal history</p>
-                  <pre className="text-xs overflow-x-auto">{"?lines=5000&format=markdown"}</pre>
+                  <p className="text-zinc-600">Capture terminal history</p>
+                  <pre className="text-[10px] overflow-x-auto text-zinc-500">{"?lines=5000&format=markdown"}</pre>
                 </div>
 
-                <div className="bg-muted/30 rounded-md p-3 space-y-2">
+                <div className="bg-zinc-900 rounded p-2.5 space-y-1">
                   <div className="flex justify-between">
-                    <span className="text-primary">GET</span>
+                    <span className="text-zinc-300">GET</span>
                     <span>/api/sessions/:id/recap</span>
                   </div>
-                  <p className="text-muted-foreground/70">Generate context recap for Claude</p>
+                  <p className="text-zinc-600">Generate context recap for Claude</p>
                 </div>
 
-                <div className="bg-muted/30 rounded-md p-3 space-y-2">
+                <div className="bg-zinc-900 rounded p-2.5 space-y-1">
                   <div className="flex justify-between">
-                    <span className="text-green-400">POST</span>
+                    <span className="text-emerald-500">POST</span>
                     <span>/api/hook</span>
                   </div>
-                  <p className="text-muted-foreground/70">Claude Code activity webhook</p>
-                  <pre className="text-xs overflow-x-auto">{"{ event, session_name?, cwd? }"}</pre>
+                  <p className="text-zinc-600">Claude Code activity webhook</p>
+                  <pre className="text-[10px] overflow-x-auto text-zinc-500">{"{ event, session_name?, cwd? }"}</pre>
                 </div>
 
-                <div className="bg-muted/30 rounded-md p-3 space-y-2">
-                  <div className="text-primary mb-1">WebSocket</div>
+                <div className="bg-zinc-900 rounded p-2.5 space-y-1">
+                  <div className="text-zinc-300 mb-1">WebSocket</div>
                   <span>/ws/:id</span>
-                  <p className="text-muted-foreground/70">Real-time terminal I/O</p>
+                  <p className="text-zinc-600">Real-time terminal I/O</p>
                 </div>
               </div>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowSettings(false)}>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowSettings(false)} className="h-8 text-[12px] border-zinc-800 text-zinc-300 hover:bg-zinc-900">
               Cancel
             </Button>
-            <Button onClick={saveSettings}>Save</Button>
+            <Button onClick={saveSettings} className="h-8 text-[12px] bg-zinc-100 text-zinc-900 hover:bg-white">Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Description Edit Dialog */}
       <Dialog open={editingDescription !== null} onOpenChange={(open) => !open && handleCancelDescription()}>
-        <DialogContent>
+        <DialogContent className="bg-zinc-950 border-zinc-800">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="text-[14px] font-medium text-zinc-100">
               {editingDescription?.type === "session" ? "Session Description" : "Folder Description"}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
                 Description
               </label>
               <Input
@@ -1036,31 +1052,32 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
                   if (e.key === "Enter") handleSaveDescription();
                   if (e.key === "Escape") handleCancelDescription();
                 }}
+                className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
                 autoFocus
               />
-              <p className="text-xs text-muted-foreground">
+              <p className="text-[11px] text-zinc-600">
                 A short description to help identify this {editingDescription?.type === "session" ? "session" : "folder"}.
               </p>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={handleCancelDescription}>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={handleCancelDescription} className="h-8 text-[12px] border-zinc-800 text-zinc-300 hover:bg-zinc-900">
               Cancel
             </Button>
-            <Button onClick={handleSaveDescription}>Save</Button>
+            <Button onClick={handleSaveDescription} className="h-8 text-[12px] bg-zinc-100 text-zinc-900 hover:bg-white">Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Doc File Edit Dialog */}
       <Dialog open={editingDocFile !== null} onOpenChange={(open) => !open && handleCancelDocFile()}>
-        <DialogContent>
+        <DialogContent className="bg-zinc-950 border-zinc-800">
           <DialogHeader>
-            <DialogTitle>Documentation File</DialogTitle>
+            <DialogTitle className="text-[14px] font-medium text-zinc-100">Documentation File</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
                 File Path
               </label>
               <Input
@@ -1072,19 +1089,20 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
                   if (e.key === "Enter") handleSaveDocFile();
                   if (e.key === "Escape") handleCancelDocFile();
                 }}
+                className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
                 autoFocus
               />
-              <p className="text-xs text-muted-foreground">
+              <p className="text-[11px] text-zinc-600">
                 Path to a documentation file (e.g., CLAUDE.md, README.md) that provides context for Claude Code.
                 This will be included when creating new terminals in this folder.
               </p>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={handleCancelDocFile}>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={handleCancelDocFile} className="h-8 text-[12px] border-zinc-800 text-zinc-300 hover:bg-zinc-900">
               Cancel
             </Button>
-            <Button onClick={handleSaveDocFile}>Save</Button>
+            <Button onClick={handleSaveDocFile} className="h-8 text-[12px] bg-zinc-100 text-zinc-900 hover:bg-white">Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

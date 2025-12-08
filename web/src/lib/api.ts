@@ -1,4 +1,5 @@
 import type { SessionInfo, SessionConfig, HealthStatus } from "./types";
+import type { ClaudeCodeMessage } from "./message-types";
 
 // Default to environment variables, allow localStorage override
 const getApiUrl = () => {
@@ -399,4 +400,257 @@ export function setFolderDocFile(folderName: string, docFile: string): void {
     delete docFiles[folderName];
   }
   localStorage.setItem(FOLDER_DOC_FILES_KEY, JSON.stringify(docFiles));
+}
+
+// ============================================================================
+// Claude Code Structured Messages API
+// ============================================================================
+
+export interface MessageSession {
+  session_id: string;
+  message_count: number;
+  latest_message_at: string;
+  first_message_at: string;
+  message_types: string[];
+}
+
+// Supabase direct access for messages (client-side)
+const getSupabaseUrl = () => {
+  if (typeof window !== "undefined") {
+    const stored = localStorage.getItem("supabaseUrl");
+    if (stored) return stored.replace(/\/+$/, "");
+  }
+  return (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/+$/, "");
+};
+
+const getSupabaseAnonKey = () => {
+  if (typeof window !== "undefined") {
+    const stored = localStorage.getItem("supabaseAnonKey");
+    if (stored) return stored.trim();
+  }
+  return (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "").trim();
+};
+
+// Helper for Supabase REST API calls
+async function supabaseRequest<T>(
+  path: string,
+  options: {
+    method?: string;
+    body?: unknown;
+    searchParams?: Record<string, string>;
+  } = {}
+): Promise<T> {
+  const supabaseUrl = getSupabaseUrl();
+  const supabaseKey = getSupabaseAnonKey();
+
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error("Supabase not configured");
+  }
+
+  const url = new URL(`${supabaseUrl}/rest/v1${path}`);
+  if (options.searchParams) {
+    for (const [key, value] of Object.entries(options.searchParams)) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  const response = await fetch(url.toString(), {
+    method: options.method || "GET",
+    headers: {
+      "apikey": supabaseKey,
+      "Authorization": `Bearer ${supabaseKey}`,
+      "Content-Type": "application/json",
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Supabase error (${response.status}): ${error}`);
+  }
+
+  const text = await response.text();
+  if (!text) return [] as T;
+  return JSON.parse(text);
+}
+
+/**
+ * Fetch structured messages for a session.
+ */
+export async function getSessionMessages(
+  sessionId: string,
+  options: {
+    limit?: number;
+    afterSeq?: number;
+    messageTypes?: string[];
+  } = {}
+): Promise<ClaudeCodeMessage[]> {
+  const searchParams: Record<string, string> = {
+    session_id: `eq.${sessionId}`,
+    order: "seq.asc",
+  };
+
+  if (options.limit) {
+    searchParams.limit = options.limit.toString();
+  }
+
+  if (options.afterSeq !== undefined) {
+    searchParams.seq = `gt.${options.afterSeq}`;
+  }
+
+  if (options.messageTypes && options.messageTypes.length > 0) {
+    searchParams.message_type = `in.(${options.messageTypes.join(",")})`;
+  }
+
+  return supabaseRequest<ClaudeCodeMessage[]>("/claude_code_messages", {
+    searchParams,
+  });
+}
+
+/**
+ * Answer a pending question from Claude.
+ */
+export async function answerQuestion(
+  messageId: string,
+  response: string
+): Promise<void> {
+  await supabaseRequest("/rpc/answer_claude_code_question", {
+    method: "POST",
+    body: {
+      p_message_id: messageId,
+      p_response: response,
+    },
+  });
+}
+
+/**
+ * Get the latest pending question for a session (if any).
+ */
+export async function getPendingQuestion(
+  sessionId: string
+): Promise<ClaudeCodeMessage | null> {
+  const messages = await supabaseRequest<ClaudeCodeMessage[]>(
+    "/claude_code_messages",
+    {
+      searchParams: {
+        session_id: `eq.${sessionId}`,
+        message_type: "eq.user_question",
+        user_response: "is.null",
+        order: "seq.desc",
+        limit: "1",
+      },
+    }
+  );
+  return messages[0] || null;
+}
+
+/**
+ * Subscribe to new messages via polling (simple approach for demo).
+ * Returns a function to stop polling.
+ */
+export function subscribeToMessages(
+  sessionId: string,
+  onMessage: (messages: ClaudeCodeMessage[]) => void,
+  intervalMs: number = 1000
+): () => void {
+  let lastSeq = -1;
+  let active = true;
+
+  const poll = async () => {
+    if (!active) return;
+
+    try {
+      const messages = await getSessionMessages(sessionId, {
+        afterSeq: lastSeq,
+      });
+
+      if (messages.length > 0) {
+        lastSeq = messages[messages.length - 1].seq;
+        onMessage(messages);
+      }
+    } catch (error) {
+      console.error("Message polling error:", error);
+    }
+
+    if (active) {
+      setTimeout(poll, intervalMs);
+    }
+  };
+
+  poll();
+
+  return () => {
+    active = false;
+  };
+}
+
+/**
+ * List all unique message sessions from Supabase.
+ * Returns session IDs with metadata about message counts and timestamps.
+ */
+export async function listMessageSessions(): Promise<MessageSession[]> {
+  const supabaseUrl = getSupabaseUrl();
+  const supabaseKey = getSupabaseAnonKey();
+
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error("Supabase not configured. Make sure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are configured.");
+  }
+
+  // Get distinct session_ids with aggregated info
+  // Using a simple approach: fetch recent messages and group client-side
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/claude_code_messages?select=session_id,message_type,created_at&order=created_at.desc&limit=1000`,
+    {
+      headers: {
+        "apikey": supabaseKey,
+        "Authorization": `Bearer ${supabaseKey}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Supabase error (${response.status}): ${error}`);
+  }
+
+  const messages: { session_id: string; message_type: string; created_at: string }[] = await response.json();
+
+  // Group by session_id
+  const sessionsMap = new Map<string, {
+    session_id: string;
+    message_count: number;
+    latest_message_at: string;
+    first_message_at: string;
+    message_types: Set<string>;
+  }>();
+
+  for (const msg of messages) {
+    const existing = sessionsMap.get(msg.session_id);
+    if (existing) {
+      existing.message_count++;
+      existing.message_types.add(msg.message_type);
+      if (msg.created_at > existing.latest_message_at) {
+        existing.latest_message_at = msg.created_at;
+      }
+      if (msg.created_at < existing.first_message_at) {
+        existing.first_message_at = msg.created_at;
+      }
+    } else {
+      sessionsMap.set(msg.session_id, {
+        session_id: msg.session_id,
+        message_count: 1,
+        latest_message_at: msg.created_at,
+        first_message_at: msg.created_at,
+        message_types: new Set([msg.message_type]),
+      });
+    }
+  }
+
+  // Convert to array and sort by latest activity
+  return Array.from(sessionsMap.values())
+    .map((s) => ({
+      ...s,
+      message_types: Array.from(s.message_types),
+    }))
+    .sort((a, b) => b.latest_message_at.localeCompare(a.latest_message_at));
 }
