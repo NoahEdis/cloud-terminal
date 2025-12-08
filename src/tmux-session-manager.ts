@@ -486,13 +486,17 @@ export class TmuxSessionManager {
 
     session.clients.add(ws);
 
-    // If no PTY yet, create one by attaching to tmux
-    if (!session.pty && session.status === "running") {
-      await this.attachPty(session);
-    }
+    // Check if we need to create a new PTY
+    const needsNewPty = !session.pty && session.status === "running";
 
-    // Send buffered output history
-    if (session.outputBuffer.length > 0) {
+    // If no PTY yet, create one by attaching to tmux
+    // Note: tmux will send its own scrollback when we attach, so we don't
+    // need to send our buffered history in this case
+    if (needsNewPty) {
+      await this.attachPty(session);
+    } else if (session.outputBuffer.length > 0) {
+      // Only send our buffered history if we already have a PTY attached
+      // (i.e., this is an additional client joining an existing connection)
       ws.send(JSON.stringify({ type: "history", data: session.outputBuffer }));
     }
 
