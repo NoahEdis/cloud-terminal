@@ -22,30 +22,38 @@ import { config } from "dotenv";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
-// Get the project root directory
+// Get the script and project directories
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const projectRoot = resolve(__dirname, "../..");
+const scriptDir = __dirname;
+const cloudTerminalDir = resolve(scriptDir, "..");
+const projectRoot = resolve(scriptDir, "../..");
 
-// Load env from project root
+// Load env from various locations
 const envFiles = [
   resolve(projectRoot, ".env.automation-engineer"),
   resolve(projectRoot, ".env"),
+  resolve(cloudTerminalDir, ".env"),
+  resolve(cloudTerminalDir, "web/.env.local"),
+  resolve(cloudTerminalDir, "web/.env"),
 ];
 for (const envFile of envFiles) {
   if (existsSync(envFile)) {
     config({ path: envFile });
-    break;
+    // Don't break - load all to allow overrides
   }
 }
 
 // Initialize Supabase client
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// Try service role key first (preferred), fall back to anon key
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
   console.error(
-    "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables"
+    "Missing Supabase environment variables. Need either:"
   );
+  console.error("  - SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (preferred)");
+  console.error("  - NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY");
   console.error("Checked:", envFiles.join(", "));
   process.exit(1);
 }
