@@ -167,11 +167,31 @@ export async function resizeSession(name: string, width: number, height: number)
 
 /**
  * Send keys to a tmux session.
+ * When literal=true and the input contains newlines, we split the input
+ * and send Enter keys separately to ensure proper readline submission.
  */
 export async function sendKeys(name: string, keys: string, literal: boolean = false): Promise<boolean> {
   try {
-    const literalFlag = literal ? "-l" : "";
-    await execAsync(`tmux send-keys -t '${escapeTmuxName(name)}' ${literalFlag} '${escapeShellArg(keys)}'`);
+    const target = escapeTmuxName(name);
+
+    if (literal) {
+      // For better readline compatibility, split on newlines and send Enter separately
+      // This ensures Claude Code and similar readline apps receive proper submission
+      const parts = keys.split(/(\n|\r\n|\r)/);
+
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (part === "\n" || part === "\r\n" || part === "\r") {
+          // Send Enter as a key name, not literal - this works better with readline
+          await execAsync(`tmux send-keys -t '${target}' Enter`);
+        } else if (part.length > 0) {
+          // Send text literally
+          await execAsync(`tmux send-keys -t '${target}' -l '${escapeShellArg(part)}'`);
+        }
+      }
+    } else {
+      await execAsync(`tmux send-keys -t '${target}' '${escapeShellArg(keys)}'`);
+    }
     return true;
   } catch {
     return false;
