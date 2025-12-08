@@ -233,10 +233,8 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
       lineHeight: 1.2,
       scrollback: 10000, // Enable scrollback buffer (10k lines)
       scrollOnUserInput: true, // Auto-scroll when user types
-      // Disable mouse wheel scroll when alternate buffer is active (for programs like less/vim)
-      // This ensures wheel scrolling always scrolls the viewport, not sends to the app
-      fastScrollModifier: "alt", // Hold Alt for fast scrolling
-      scrollSensitivity: 1, // Normal scroll sensitivity
+      // Explicitly allow scrolling - don't let mouse reporting capture scroll events
+      allowProposedApi: true,
       theme: {
         background: "#050508",
         foreground: "#E8ECF4",
@@ -272,71 +270,86 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Fix: Ensure wheel scrolling always works on desktop
-    // xterm.js can capture wheel events for mouse reporting mode, which breaks scrolling
-    const viewport = terminalRef.current.querySelector('.xterm-viewport') as HTMLElement;
-    if (viewport) {
-      // Desktop wheel scroll fix
-      // When mouse reporting is enabled by shell/apps, wheel events get captured
-      // This handler ensures wheel scrolling always scrolls the viewport
-      const handleWheel = (e: WheelEvent) => {
-        // Check if we have scrollback content to scroll through
-        const buffer = term.buffer.active;
-        const hasScrollback = buffer.baseY > 0;
+    // Fix: Ensure wheel scrolling always works
+    // xterm.js mouse reporting can capture wheel events, breaking scrolling
+    // We intercept wheel events and use xterm's scrollLines API directly
+    const termElement = terminalRef.current;
 
-        if (hasScrollback) {
-          // Calculate scroll direction and amount
-          const scrollAmount = Math.sign(e.deltaY) * 3; // 3 lines per scroll tick
+    const handleWheel = (e: WheelEvent) => {
+      // Always handle wheel events for scrolling
+      // Calculate lines to scroll based on deltaY
+      // deltaMode: 0 = pixels, 1 = lines, 2 = pages
+      let lines: number;
+      if (e.deltaMode === 1) {
+        // Already in lines
+        lines = e.deltaY;
+      } else if (e.deltaMode === 2) {
+        // Pages - convert to ~20 lines per page
+        lines = e.deltaY * 20;
+      } else {
+        // Pixels - convert to lines (roughly 20 pixels per line)
+        lines = Math.round(e.deltaY / 20);
+      }
 
-          // Get current and target positions
-          const currentLine = buffer.viewportY;
-          const maxLine = buffer.baseY;
-          const targetLine = Math.max(0, Math.min(maxLine, currentLine + scrollAmount));
+      // Clamp to reasonable range and ensure at least 1 line movement
+      if (lines !== 0) {
+        lines = Math.sign(lines) * Math.max(1, Math.min(Math.abs(lines), 10));
+      }
 
-          // Only intercept if we're not at the edges (let natural behavior take over at edges)
-          const isAtTop = currentLine === 0 && e.deltaY < 0;
-          const isAtBottom = currentLine >= maxLine && e.deltaY > 0;
+      if (lines !== 0) {
+        term.scrollLines(lines);
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
 
-          if (!isAtTop && !isAtBottom) {
-            // Scroll the terminal viewport
-            term.scrollLines(scrollAmount);
+    // Add wheel handler with high priority (capture phase)
+    termElement.addEventListener('wheel', handleWheel, { capture: true, passive: false });
+
+    // Mobile touch scrolling fix
+    // xterm.js captures touch events which prevents native scrolling on mobile
+    const viewport = termElement.querySelector('.xterm-viewport') as HTMLElement;
+    let touchStartY = 0;
+    let isTouchScrolling = false;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        touchStartY = e.touches[0].clientY;
+        isTouchScrolling = false;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        const touchY = e.touches[0].clientY;
+        const deltaY = touchStartY - touchY;
+
+        // Only start scrolling after a small threshold to avoid accidental scrolls
+        if (!isTouchScrolling && Math.abs(deltaY) > 5) {
+          isTouchScrolling = true;
+        }
+
+        if (isTouchScrolling) {
+          // Convert pixel delta to lines (roughly 20 pixels per line)
+          const lines = Math.round(deltaY / 20);
+          if (lines !== 0) {
+            term.scrollLines(lines);
+            touchStartY = touchY; // Reset for continuous scrolling
             e.preventDefault();
-            e.stopPropagation();
           }
         }
-      };
+      }
+    };
 
-      // Add wheel handler with high priority (capture phase)
-      terminalRef.current.addEventListener('wheel', handleWheel, { capture: true, passive: false });
+    termElement.addEventListener('touchstart', handleTouchStart, { passive: true });
+    termElement.addEventListener('touchmove', handleTouchMove, { passive: false });
 
-      // Mobile touch scrolling fix
-      // xterm.js captures touch events which prevents native scrolling on mobile
-      let touchStartY = 0;
-      let touchStartScrollTop = 0;
-
-      const handleTouchStart = (e: TouchEvent) => {
-        if (e.touches.length === 1) {
-          touchStartY = e.touches[0].clientY;
-          touchStartScrollTop = viewport.scrollTop;
-        }
-      };
-
-      const handleTouchMove = (e: TouchEvent) => {
-        if (e.touches.length === 1) {
-          const touchY = e.touches[0].clientY;
-          const deltaY = touchStartY - touchY;
-          viewport.scrollTop = touchStartScrollTop + deltaY;
-          // Prevent default only if we're actually scrolling the terminal
-          if (viewport.scrollTop > 0 || deltaY > 0) {
-            e.preventDefault();
-          }
-        }
-      };
-
-      // Use passive: false to allow preventDefault
-      terminalRef.current.addEventListener('touchstart', handleTouchStart, { passive: true });
-      terminalRef.current.addEventListener('touchmove', handleTouchMove, { passive: false });
-    }
+    // Store handlers for cleanup
+    const cleanupScrollHandlers = () => {
+      termElement.removeEventListener('wheel', handleWheel, { capture: true } as EventListenerOptions);
+      termElement.removeEventListener('touchstart', handleTouchStart);
+      termElement.removeEventListener('touchmove', handleTouchMove);
+    };
 
     // Track scroll position to show/hide scroll button
     // Use throttling to prevent excessive state updates during rapid scrolling
@@ -393,6 +406,7 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
 
     return () => {
       window.removeEventListener("resize", handleResize);
+      cleanupScrollHandlers();
       // Mark close as intentional to prevent reconnection attempts
       intentionalCloseRef.current = true;
       // Clear any pending reconnect timeout
