@@ -26,8 +26,9 @@ export function createTerminalServer(config: ServerConfig = {}) {
   const app = new Hono();
 
   // Middleware - explicit CORS configuration for cross-origin access
+  // Use a function to dynamically return the request origin (required when credentials: true)
   app.use("*", cors({
-    origin: "*", // Allow all origins (can restrict to specific Vercel domains later)
+    origin: (origin) => origin || "*", // Echo back the request origin
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization", "X-API-Key"],
     exposeHeaders: ["Content-Length"],

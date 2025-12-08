@@ -643,18 +643,18 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
             {sessionDescriptions[sessionId]}
           </div>
         )}
-        <div className="mt-1.5 flex items-center justify-between text-[11px] text-zinc-500">
-          <span className="truncate flex-1">{session.cwd}</span>
-          <div className="ml-2 flex-shrink-0 flex items-center gap-2">
+        <div className="mt-1.5 flex items-center gap-2 text-[11px] text-zinc-500">
+          <span className="truncate flex-1 min-w-0">{session.cwd}</span>
+          <span className="flex-shrink-0 whitespace-nowrap text-zinc-600">
             {(() => {
               const metrics = formatMetrics(session.metrics);
               if (metrics) {
-                return <span className="text-zinc-600">{metrics.lines}L / {metrics.tokens}t</span>;
+                return `${metrics.lines}L / ${metrics.tokens}t`;
               }
               return null;
             })()}
-            <span>{formatTime(session.lastActivity)}</span>
-          </div>
+          </span>
+          <span className="flex-shrink-0 whitespace-nowrap">{formatTime(session.lastActivity)}</span>
         </div>
       </div>
     );

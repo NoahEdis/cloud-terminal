@@ -18,6 +18,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync } from "fs";
+import { execSync } from "child_process";
 import { config } from "dotenv";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -114,9 +115,144 @@ interface TranscriptEntry {
   };
 }
 
-// Find or create terminal session UUID from Claude session ID
-async function getTerminalSessionId(claudeSessionId: string): Promise<string | null> {
-  // First, check if there's a terminal session with this claude session ID in metadata
+// Detect the tmux session name if running inside tmux
+function getTmuxSessionName(): string | null {
+  // Check if we're running inside tmux
+  if (!process.env.TMUX) {
+    return null;
+  }
+
+  try {
+    // Get the tmux session name using tmux command
+    const sessionName = execSync("tmux display-message -p '#S'", {
+      encoding: "utf-8",
+      timeout: 5000,
+    }).trim();
+
+    if (sessionName) {
+      return sessionName;
+    }
+  } catch (error) {
+    console.error("[MessageHook] Failed to get tmux session name:", error);
+  }
+
+  return null;
+}
+
+// Get session ID for storing messages
+// Priority:
+// 1) tmux session name (if running inside tmux)
+// 2) Existing session with matching claude_session_id in metadata
+// 3) Existing session with matching CWD
+// 4) Create new session with Claude session ID (fallback)
+async function getSessionId(claudeSessionId: string, cwd?: string): Promise<string | null> {
+  const tmuxSessionName = getTmuxSessionName();
+
+  if (tmuxSessionName) {
+    // Using tmux session name as the primary identifier
+    console.log(`[MessageHook] Using tmux session: ${tmuxSessionName}`);
+
+    // Check if this tmux session exists in the database
+    const { data: existing } = await supabase
+      .from("terminal_sessions")
+      .select("id, metadata")
+      .eq("id", tmuxSessionName)
+      .single();
+
+    if (existing) {
+      // Update metadata with Claude session ID if not already set
+      const metadata = (existing.metadata as Record<string, unknown>) || {};
+      if (!metadata.claude_session_id || metadata.claude_session_id !== claudeSessionId) {
+        await supabase
+          .from("terminal_sessions")
+          .update({
+            metadata: { ...metadata, claude_session_id: claudeSessionId },
+          })
+          .eq("id", tmuxSessionName);
+        console.log(`[MessageHook] Associated Claude session ${claudeSessionId.slice(0, 8)}... with tmux session ${tmuxSessionName}`);
+      }
+      return existing.id;
+    }
+
+    // Tmux session doesn't exist in DB yet - create it
+    // Note: In production, the tmux session should already exist (created by Cloud Terminal)
+    // This is a fallback for when Claude Code starts before the session is registered
+    const { data: created, error } = await supabase
+      .from("terminal_sessions")
+      .insert({
+        id: tmuxSessionName,
+        command: "claude",
+        status: "running",
+        activity_state: "busy",
+        metadata: { claude_session_id: claudeSessionId },
+      })
+      .select("id")
+      .single();
+
+    if (error) {
+      // Session might have been created by another process, try to fetch it
+      const { data: retried } = await supabase
+        .from("terminal_sessions")
+        .select("id")
+        .eq("id", tmuxSessionName)
+        .single();
+
+      if (retried) {
+        return retried.id;
+      }
+
+      console.error("[MessageHook] Failed to create terminal session:", error.message);
+      return null;
+    }
+
+    return created?.id || null;
+  }
+
+  // Not in tmux - try to find an existing session to associate with
+  console.log(`[MessageHook] Not in tmux, looking for matching session...`);
+
+  // Strategy 1: Check if there's already a session with this claude_session_id in metadata
+  const { data: byMetadata } = await supabase
+    .from("terminal_sessions")
+    .select("id")
+    .eq("metadata->>claude_session_id", claudeSessionId)
+    .single();
+
+  if (byMetadata) {
+    console.log(`[MessageHook] Found session by claude_session_id: ${byMetadata.id}`);
+    return byMetadata.id;
+  }
+
+  // Strategy 2: Find a session by matching CWD (most likely to be the correct one)
+  if (cwd) {
+    const normalizedCwd = cwd.replace(/\/+$/, "");
+    const { data: byCwd } = await supabase
+      .from("terminal_sessions")
+      .select("id, metadata, cwd")
+      .eq("cwd", normalizedCwd)
+      .eq("status", "running")
+      .order("last_activity", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (byCwd) {
+      // Found a session with matching CWD - associate the Claude session ID with it
+      const metadata = (byCwd.metadata as Record<string, unknown>) || {};
+      if (!metadata.claude_session_id) {
+        await supabase
+          .from("terminal_sessions")
+          .update({
+            metadata: { ...metadata, claude_session_id: claudeSessionId },
+          })
+          .eq("id", byCwd.id);
+        console.log(`[MessageHook] Associated Claude session ${claudeSessionId.slice(0, 8)}... with CWD-matched session ${byCwd.id}`);
+      }
+      console.log(`[MessageHook] Found session by CWD: ${byCwd.id}`);
+      return byCwd.id;
+    }
+  }
+
+  // Strategy 3: Check if session already exists with this Claude session ID as its ID
   const { data: existing } = await supabase
     .from("terminal_sessions")
     .select("id")
@@ -124,26 +260,18 @@ async function getTerminalSessionId(claudeSessionId: string): Promise<string | n
     .single();
 
   if (existing) {
+    console.log(`[MessageHook] Using existing Claude session: ${claudeSessionId.slice(0, 8)}...`);
     return existing.id;
   }
 
-  // Try to find by metadata
-  const { data: byMeta } = await supabase
-    .from("terminal_sessions")
-    .select("id")
-    .contains("metadata", { claude_session_id: claudeSessionId })
-    .limit(1);
-
-  if (byMeta && byMeta.length > 0) {
-    return byMeta[0].id;
-  }
-
-  // Create a new session entry for this Claude session
+  // Fallback: Create new session with Claude session ID
+  console.log(`[MessageHook] Creating new session with Claude ID: ${claudeSessionId.slice(0, 8)}...`);
   const { data: created, error } = await supabase
     .from("terminal_sessions")
     .insert({
       id: claudeSessionId,
       command: "claude",
+      cwd: cwd || process.env.HOME || "/",
       status: "running",
       activity_state: "busy",
     })
@@ -151,7 +279,7 @@ async function getTerminalSessionId(claudeSessionId: string): Promise<string | n
     .single();
 
   if (error) {
-    console.error("Failed to create terminal session:", error.message);
+    console.error("[MessageHook] Failed to create terminal session:", error.message);
     return null;
   }
 
@@ -225,10 +353,10 @@ function getRecentAssistantOutput(transcriptPath: string, maxLines = 50): string
 async function handleHookEvent(context: HookContext): Promise<void> {
   const { session_id, hook_event_name, transcript_path } = context;
 
-  // Get or create terminal session
-  const terminalSessionId = await getTerminalSessionId(session_id);
+  // Get session ID (tmux session name if available, otherwise match by CWD or Claude session ID)
+  const terminalSessionId = await getSessionId(session_id, context.cwd);
   if (!terminalSessionId) {
-    console.error("Could not get terminal session ID");
+    console.error("[MessageHook] Could not get session ID");
     return;
   }
 

@@ -437,6 +437,7 @@ export class TmuxSessionManager {
 
   /**
    * Write data to a session.
+   * Always uses tmux send-keys for reliable Enter key handling with readline apps.
    */
   write(name: string, data: string): boolean {
     const session = this.sessions.get(name);
@@ -444,13 +445,11 @@ export class TmuxSessionManager {
 
     session.lastActivity = new Date();
 
-    // If we have a PTY attached, write to it
-    if (session.pty) {
-      session.pty.write(data);
-    } else {
-      // Otherwise send keys via tmux command
-      tmux.sendKeys(name, data, true);
-    }
+    // Always use tmux send-keys for input - this ensures proper Enter key
+    // handling with readline-based apps like Claude Code.
+    // The literal=true flag splits on newlines and sends Enter as a key name,
+    // which works more reliably than writing \r directly to a PTY.
+    tmux.sendKeys(name, data, true);
 
     return true;
   }

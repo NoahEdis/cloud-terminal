@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get("limit") || "500", 10);
 
     // Fetch nodes from graph_nodes table
-    let nodesQuery = `${supabaseUrl}/rest/v1/graph_nodes?select=id,labels,properties,name&limit=${limit}`;
+    let nodesQuery = `${supabaseUrl}/rest/v1/graph_nodes?select=id,labels,properties&limit=${limit}`;
 
     // Add label filter if provided
     if (labels && labels.length > 0) {
@@ -68,13 +68,12 @@ export async function GET(request: NextRequest) {
       id: string;
       labels: string[];
       properties: Record<string, unknown>;
-      name?: string;
     }> = await nodesResponse.json();
 
     // Transform nodes
     const nodes: GraphNode[] = rawNodes.map((node) => ({
       id: node.id,
-      label: node.name || (node.properties?.name as string) || node.labels[0] || node.id.slice(0, 8),
+      label: (node.properties?.name as string) || node.labels?.[0] || node.id.slice(0, 8),
       labels: node.labels || [],
       properties: node.properties || {},
     }));

@@ -35,9 +35,10 @@ export function createTmuxTerminalServer(config: ServerConfig = {}) {
   // Create Hono app
   const app = new Hono();
 
-  // Middleware
+  // Middleware - explicit CORS configuration for cross-origin access
+  // Use a function to dynamically return the request origin (required when credentials: true)
   app.use("*", cors({
-    origin: "*",
+    origin: (origin) => origin || "*", // Echo back the request origin
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization", "X-API-Key"],
     exposeHeaders: ["Content-Length"],
