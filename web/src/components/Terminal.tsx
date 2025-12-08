@@ -140,6 +140,19 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
       reconnectTimeoutRef.current = null;
     }
 
+    // Close any existing connection to prevent duplicates
+    if (wsRef.current) {
+      try {
+        wsRef.current.onclose = null; // Prevent reconnection logic
+        wsRef.current.onerror = null;
+        wsRef.current.onmessage = null;
+        wsRef.current.close();
+      } catch {
+        // Ignore close errors
+      }
+      wsRef.current = null;
+    }
+
     const wsUrl = getWebSocketUrl(sessionId);
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
