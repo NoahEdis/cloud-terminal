@@ -233,6 +233,10 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
       lineHeight: 1.2,
       scrollback: 10000, // Enable scrollback buffer (10k lines)
       scrollOnUserInput: true, // Auto-scroll when user types
+      // Disable mouse wheel scroll when alternate buffer is active (for programs like less/vim)
+      // This ensures wheel scrolling always scrolls the viewport, not sends to the app
+      fastScrollModifier: "alt", // Hold Alt for fast scrolling
+      scrollSensitivity: 1, // Normal scroll sensitivity
       theme: {
         background: "#050508",
         foreground: "#E8ECF4",
@@ -268,10 +272,45 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Mobile touch scrolling fix
-    // xterm.js captures touch events which prevents native scrolling on mobile
+    // Fix: Ensure wheel scrolling always works on desktop
+    // xterm.js can capture wheel events for mouse reporting mode, which breaks scrolling
     const viewport = terminalRef.current.querySelector('.xterm-viewport') as HTMLElement;
     if (viewport) {
+      // Desktop wheel scroll fix
+      // When mouse reporting is enabled by shell/apps, wheel events get captured
+      // This handler ensures wheel scrolling always scrolls the viewport
+      const handleWheel = (e: WheelEvent) => {
+        // Check if we have scrollback content to scroll through
+        const buffer = term.buffer.active;
+        const hasScrollback = buffer.baseY > 0;
+
+        if (hasScrollback) {
+          // Calculate scroll direction and amount
+          const scrollAmount = Math.sign(e.deltaY) * 3; // 3 lines per scroll tick
+
+          // Get current and target positions
+          const currentLine = buffer.viewportY;
+          const maxLine = buffer.baseY;
+          const targetLine = Math.max(0, Math.min(maxLine, currentLine + scrollAmount));
+
+          // Only intercept if we're not at the edges (let natural behavior take over at edges)
+          const isAtTop = currentLine === 0 && e.deltaY < 0;
+          const isAtBottom = currentLine >= maxLine && e.deltaY > 0;
+
+          if (!isAtTop && !isAtBottom) {
+            // Scroll the terminal viewport
+            term.scrollLines(scrollAmount);
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }
+      };
+
+      // Add wheel handler with high priority (capture phase)
+      terminalRef.current.addEventListener('wheel', handleWheel, { capture: true, passive: false });
+
+      // Mobile touch scrolling fix
+      // xterm.js captures touch events which prevents native scrolling on mobile
       let touchStartY = 0;
       let touchStartScrollTop = 0;
 
