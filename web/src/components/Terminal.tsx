@@ -268,6 +268,37 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
+    // Mobile touch scrolling fix
+    // xterm.js captures touch events which prevents native scrolling on mobile
+    const viewport = terminalRef.current.querySelector('.xterm-viewport') as HTMLElement;
+    if (viewport) {
+      let touchStartY = 0;
+      let touchStartScrollTop = 0;
+
+      const handleTouchStart = (e: TouchEvent) => {
+        if (e.touches.length === 1) {
+          touchStartY = e.touches[0].clientY;
+          touchStartScrollTop = viewport.scrollTop;
+        }
+      };
+
+      const handleTouchMove = (e: TouchEvent) => {
+        if (e.touches.length === 1) {
+          const touchY = e.touches[0].clientY;
+          const deltaY = touchStartY - touchY;
+          viewport.scrollTop = touchStartScrollTop + deltaY;
+          // Prevent default only if we're actually scrolling the terminal
+          if (viewport.scrollTop > 0 || deltaY > 0) {
+            e.preventDefault();
+          }
+        }
+      };
+
+      // Use passive: false to allow preventDefault
+      terminalRef.current.addEventListener('touchstart', handleTouchStart, { passive: true });
+      terminalRef.current.addEventListener('touchmove', handleTouchMove, { passive: false });
+    }
+
     // Track scroll position to show/hide scroll button
     // Use throttling to prevent excessive state updates during rapid scrolling
     term.onScroll(() => {

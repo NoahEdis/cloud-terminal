@@ -578,9 +578,10 @@ body {
   scrollbar-gutter: stable;
 }
 
-/* Allow touch scrolling on the viewport element */
+/* Allow touch scrolling on all xterm elements */
 .terminal-container .xterm-viewport,
-.terminal-container .xterm-screen {
+.terminal-container .xterm-screen,
+.terminal-container .xterm-rows {
   touch-action: pan-y pinch-zoom;
 }
 
@@ -591,11 +592,23 @@ body {
     -webkit-overflow-scrolling: touch;
     /* Prevent scroll chaining to parent elements */
     overscroll-behavior-y: contain;
+    /* Ensure viewport receives touch events */
+    touch-action: pan-y !important;
   }
 
-  /* Ensure touch events work properly */
+  /* Make the xterm container pass through touches to viewport */
+  .terminal-container .xterm {
+    touch-action: pan-y !important;
+  }
+
+  /* Ensure screen layer allows touch passthrough for scrolling */
   .terminal-container .xterm-screen {
-    touch-action: pan-y;
+    touch-action: pan-y !important;
+  }
+
+  /* The rows layer should not block scrolling */
+  .terminal-container .xterm-rows {
+    touch-action: pan-y !important;
   }
 }
 
