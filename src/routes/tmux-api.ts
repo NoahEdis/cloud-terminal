@@ -78,6 +78,29 @@ tmuxApi.get("/sessions/:name", (c) => {
   });
 });
 
+// Rename a session
+tmuxApi.post("/sessions/:name/rename", async (c) => {
+  const oldName = c.req.param("name");
+  const body = await c.req.json<{ newName: string }>();
+
+  if (!body.newName || typeof body.newName !== "string") {
+    return c.json({ error: "newName is required and must be a string" }, 400);
+  }
+
+  try {
+    const renamed = await tmuxSessionManager.rename(oldName, body.newName);
+
+    if (!renamed) {
+      return c.json({ error: "Session not found or rename failed" }, 404);
+    }
+
+    return c.json({ success: true, oldName, newName: body.newName });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to rename session";
+    return c.json({ error: message }, 400);
+  }
+});
+
 // Delete/kill a session
 tmuxApi.delete("/sessions/:name", async (c) => {
   const name = c.req.param("name");

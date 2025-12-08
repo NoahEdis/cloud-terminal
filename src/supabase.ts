@@ -173,6 +173,35 @@ export async function updateSessionStatus(
 }
 
 /**
+ * Rename a session in Supabase.
+ * Updates both the session ID and any associated output records.
+ */
+export async function renameSession(oldId: string, newId: string): Promise<void> {
+  if (!isSupabaseEnabled()) return;
+
+  // Flush any pending output for the old session first
+  await flushOutputBatch(oldId);
+
+  try {
+    // Update the session ID
+    await supabaseRequest("PATCH", "/terminal_sessions", {
+      searchParams: { id: `eq.${oldId}` },
+      body: { id: newId },
+    });
+
+    // Update output references to point to the new session ID
+    await supabaseRequest("PATCH", "/terminal_output", {
+      searchParams: { session_id: `eq.${oldId}` },
+      body: { session_id: newId },
+    });
+
+    console.log(`[Supabase] Renamed session ${oldId} -> ${newId}`);
+  } catch (error) {
+    console.error(`[Supabase] Failed to rename session ${oldId} -> ${newId}:`, error);
+  }
+}
+
+/**
  * Delete a session from Supabase.
  */
 export async function deleteSession(sessionId: string): Promise<void> {

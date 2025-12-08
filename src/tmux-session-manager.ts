@@ -66,6 +66,8 @@ export interface TmuxSessionInfo {
 
 export class TmuxSessionManager {
   private sessions = new Map<string, TmuxManagedSession>();
+  // Track session_id -> name mapping to detect renames
+  private sessionIdToName = new Map<string, string>();
   private syncInterval: NodeJS.Timeout | null = null;
   private cleanupInterval: NodeJS.Timeout | null = null;
   private tmuxAvailable = false;
@@ -97,11 +99,49 @@ export class TmuxSessionManager {
   }
 
   /**
-   * Sync with tmux to discover new/removed sessions.
+   * Sync with tmux to discover new/removed/renamed sessions.
    */
   async syncTmuxSessions(): Promise<void> {
     const tmuxSessions = await tmux.listSessions();
     const tmuxNames = new Set(tmuxSessions.map(s => s.name));
+    const tmuxIds = new Set(tmuxSessions.map(s => s.id));
+
+    // Check for renamed sessions first (same session_id, different name)
+    for (const ts of tmuxSessions) {
+      const oldName = this.sessionIdToName.get(ts.id);
+      if (oldName && oldName !== ts.name && this.sessions.has(oldName)) {
+        // Session was renamed!
+        console.log(`[TmuxSessionManager] Session renamed: ${oldName} -> ${ts.name}`);
+
+        const session = this.sessions.get(oldName)!;
+
+        // Update the session's name
+        session.name = ts.name;
+        session.tmuxSession = ts;
+
+        // Move to new key in sessions map
+        this.sessions.delete(oldName);
+        this.sessions.set(ts.name, session);
+
+        // Update the id->name mapping
+        this.sessionIdToName.set(ts.id, ts.name);
+
+        // Broadcast rename event to all connected clients
+        const renameMessage = JSON.stringify({
+          type: "rename",
+          oldName,
+          newName: ts.name
+        });
+        for (const client of session.clients) {
+          if (client.readyState === 1) {
+            client.send(renameMessage);
+          }
+        }
+
+        // Update in Supabase
+        supabase.renameSession(oldName, ts.name);
+      }
+    }
 
     // Add new sessions discovered from tmux
     for (const ts of tmuxSessions) {
@@ -122,6 +162,8 @@ export class TmuxSessionManager {
           activityState: "idle",
           source: ts.name.startsWith(CLOUD_SESSION_PREFIX) ? "cloud" : "local",
         });
+        // Track the session_id -> name mapping
+        this.sessionIdToName.set(ts.id, ts.name);
       } else {
         // Update existing session metadata
         const session = this.sessions.get(ts.name)!;
@@ -129,12 +171,18 @@ export class TmuxSessionManager {
         session.lastActivity = ts.lastActivity;
         session.cols = ts.width;
         session.rows = ts.height;
+        // Ensure id mapping is tracked
+        this.sessionIdToName.set(ts.id, ts.name);
       }
     }
 
     // Mark sessions that no longer exist in tmux as exited
     for (const [name, session] of this.sessions) {
       if (!tmuxNames.has(name) && session.status === "running") {
+        // Check if this session was renamed (don't mark as exited)
+        const wasRenamed = session.tmuxSession && tmuxIds.has(session.tmuxSession.id);
+        if (wasRenamed) continue;
+
         console.log(`[TmuxSessionManager] Session ${name} no longer exists in tmux`);
         session.status = "exited";
         session.activityState = "exited";
@@ -153,6 +201,11 @@ export class TmuxSessionManager {
             session.pty.kill();
           } catch {}
           session.pty = null;
+        }
+
+        // Clean up id mapping
+        if (session.tmuxSession) {
+          this.sessionIdToName.delete(session.tmuxSession.id);
         }
       }
     }
@@ -245,6 +298,55 @@ export class TmuxSessionManager {
       attached: s.tmuxSession?.attached || false,
       windows: s.tmuxSession?.windows || 1,
     }));
+  }
+
+  /**
+   * Rename a session.
+   * Renames the tmux session and updates all tracking.
+   */
+  async rename(oldName: string, newName: string): Promise<boolean> {
+    const session = this.sessions.get(oldName);
+    if (!session) return false;
+
+    // Check if new name already exists
+    if (this.sessions.has(newName)) {
+      throw new Error(`Session '${newName}' already exists`);
+    }
+
+    // Rename in tmux
+    const renamed = await tmux.renameSession(oldName, newName);
+    if (!renamed) return false;
+
+    // Update session name
+    session.name = newName;
+
+    // Move to new key in sessions map
+    this.sessions.delete(oldName);
+    this.sessions.set(newName, session);
+
+    // Update id->name mapping
+    if (session.tmuxSession) {
+      this.sessionIdToName.set(session.tmuxSession.id, newName);
+    }
+
+    // Broadcast rename event to all connected clients
+    const renameMessage = JSON.stringify({
+      type: "rename",
+      oldName,
+      newName
+    });
+    for (const client of session.clients) {
+      if (client.readyState === 1) {
+        client.send(renameMessage);
+      }
+    }
+
+    console.log(`[TmuxSessionManager] Renamed session: ${oldName} -> ${newName}`);
+
+    // Update in Supabase
+    supabase.renameSession(oldName, newName);
+
+    return true;
   }
 
   /**
