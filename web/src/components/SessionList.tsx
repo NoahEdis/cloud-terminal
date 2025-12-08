@@ -46,7 +46,7 @@ import {
   getFolderDocFiles,
   setFolderDocFile,
 } from "@/lib/api";
-import type { SessionInfo, SessionConfig, ActivityState } from "@/lib/types";
+import type { SessionInfo, SessionConfig, ActivityState, SessionMetrics } from "@/lib/types";
 import { getSessionId } from "@/lib/types";
 
 import { Button } from "@/components/ui/button";
@@ -378,6 +378,21 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
+  // Format metrics for display (lines and estimated tokens)
+  const formatMetrics = (metrics?: SessionMetrics) => {
+    if (!metrics || metrics.lineCount === 0) return null;
+
+    const formatNumber = (n: number) => {
+      if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+      return n.toString();
+    };
+
+    return {
+      lines: formatNumber(metrics.lineCount),
+      tokens: formatNumber(metrics.estimatedTokens),
+    };
+  };
+
   // Sync localStorage data periodically to ensure consistency across devices/tabs
   useEffect(() => {
     const syncLocalStorage = () => {
@@ -507,7 +522,29 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
         )}
         <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
           <span className="truncate flex-1">{session.cwd}</span>
-          <span className="ml-2 flex-shrink-0">{formatTime(session.lastActivity)}</span>
+          <div className="ml-2 flex-shrink-0 flex items-center gap-2">
+            {(() => {
+              const metrics = formatMetrics(session.metrics);
+              if (metrics) {
+                return (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="text-muted-foreground/60">{metrics.lines}L / {metrics.tokens}t</span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <div className="text-xs">
+                        <div>{session.metrics?.lineCount?.toLocaleString()} lines</div>
+                        <div>{session.metrics?.charCount?.toLocaleString()} chars</div>
+                        <div>~{session.metrics?.estimatedTokens?.toLocaleString()} tokens</div>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              }
+              return null;
+            })()}
+            <span>{formatTime(session.lastActivity)}</span>
+          </div>
         </div>
       </Card>
     );

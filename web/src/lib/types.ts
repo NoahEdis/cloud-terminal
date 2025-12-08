@@ -1,5 +1,16 @@
 export type ActivityState = "idle" | "busy" | "exited";
 
+export interface SessionMetrics {
+  // Total number of newlines in output (actual lines of content)
+  lineCount: number;
+  // Total characters in output buffer
+  charCount: number;
+  // Detected Claude Code message boundaries (user prompts + assistant responses)
+  messageCount: number;
+  // Estimated token count (rough approximation: chars / 4)
+  estimatedTokens: number;
+}
+
 export interface SessionInfo {
   // Tmux mode uses `name` as the identifier, PTY mode uses `id`
   id?: string;
@@ -24,6 +35,8 @@ export interface SessionInfo {
   // Client-side only (stored in localStorage)
   displayName?: string;
   folder?: string;
+  // Session metrics for context tracking
+  metrics?: SessionMetrics;
 }
 
 // Helper to get session identifier (works with both tmux and PTY modes)

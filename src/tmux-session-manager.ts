@@ -47,6 +47,19 @@ export interface TmuxManagedSession {
   activityState: ActivityState;
   // Whether created via cloud terminal or discovered locally
   source: "cloud" | "local";
+  // Metrics for context tracking
+  metrics: SessionMetrics;
+}
+
+export interface SessionMetrics {
+  // Total number of newlines in output (actual lines of content)
+  lineCount: number;
+  // Total characters in output buffer
+  charCount: number;
+  // Detected Claude Code message boundaries (user prompts + assistant responses)
+  messageCount: number;
+  // Estimated token count (rough approximation: chars / 4)
+  estimatedTokens: number;
 }
 
 export interface TmuxSessionInfo {
@@ -62,6 +75,48 @@ export interface TmuxSessionInfo {
   source: "cloud" | "local";
   attached: boolean; // Whether attached locally (via tmux attach)
   windows: number;
+  // Metrics for context tracking
+  metrics: SessionMetrics;
+}
+
+// Helper to create initial metrics
+function createInitialMetrics(): SessionMetrics {
+  return {
+    lineCount: 0,
+    charCount: 0,
+    messageCount: 0,
+    estimatedTokens: 0,
+  };
+}
+
+// Pattern to detect Claude Code message boundaries
+// Matches the typical Claude prompt patterns like "╭" (box drawing) or "> " prompts
+const CLAUDE_MESSAGE_PATTERNS = [
+  /╭─/,  // Claude Code box drawing start
+  /Human:/,  // Direct API pattern
+  /Assistant:/,  // Direct API pattern
+  /^> /m,  // User input prompt
+];
+
+// Update metrics based on new output data
+function updateMetrics(metrics: SessionMetrics, newData: string, fullBuffer: string): void {
+  // Count new lines in the new data
+  const newLines = (newData.match(/\n/g) || []).length;
+  metrics.lineCount += newLines;
+
+  // Update character count
+  metrics.charCount = fullBuffer.length;
+
+  // Rough token estimate (GPT-like: ~4 chars per token)
+  metrics.estimatedTokens = Math.ceil(metrics.charCount / 4);
+
+  // Try to detect Claude message boundaries in new output
+  for (const pattern of CLAUDE_MESSAGE_PATTERNS) {
+    const matches = newData.match(new RegExp(pattern, 'g'));
+    if (matches) {
+      metrics.messageCount += matches.length;
+    }
+  }
 }
 
 export class TmuxSessionManager {
@@ -161,6 +216,7 @@ export class TmuxSessionManager {
           status: "running",
           activityState: "idle",
           source: ts.name.startsWith(CLOUD_SESSION_PREFIX) ? "cloud" : "local",
+          metrics: createInitialMetrics(),
         });
         // Track the session_id -> name mapping
         this.sessionIdToName.set(ts.id, ts.name);
@@ -249,6 +305,7 @@ export class TmuxSessionManager {
       status: "running",
       activityState: "idle",
       source: "cloud",
+      metrics: createInitialMetrics(),
     };
 
     this.sessions.set(name, session);
@@ -297,6 +354,7 @@ export class TmuxSessionManager {
       source: s.source,
       attached: s.tmuxSession?.attached || false,
       windows: s.tmuxSession?.windows || 1,
+      metrics: s.metrics,
     }));
   }
 
@@ -488,6 +546,9 @@ export class TmuxSessionManager {
       if (session.outputBuffer.length > MAX_BUFFER_SIZE) {
         session.outputBuffer = session.outputBuffer.slice(-MAX_BUFFER_SIZE);
       }
+
+      // Update metrics
+      updateMetrics(session.metrics, data, session.outputBuffer);
 
       // Broadcast to all connected clients
       const message = JSON.stringify({ type: "output", data });
