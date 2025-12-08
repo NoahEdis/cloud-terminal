@@ -51,6 +51,7 @@ export async function GET(request: NextRequest) {
       headers: {
         apikey: supabaseKey,
         Authorization: `Bearer ${supabaseKey}`,
+        "Accept-Profile": "neo4j",
       },
     });
 
@@ -88,6 +89,7 @@ export async function GET(request: NextRequest) {
         headers: {
           apikey: supabaseKey,
           Authorization: `Bearer ${supabaseKey}`,
+          "Accept-Profile": "neo4j",
         },
       }
     );
