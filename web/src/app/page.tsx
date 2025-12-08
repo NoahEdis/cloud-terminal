@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import {
   Terminal as TerminalIcon,
   MessageSquare,
+  Network,
   PanelLeftClose,
   PanelLeft,
   ArrowUp,
@@ -20,9 +21,8 @@ import {
 import {
   listSessions,
   sendInput,
-  listMessageSessions,
   uploadImage,
-  type MessageSession,
+  getSessionMessageCount,
 } from "@/lib/api";
 import type { SessionInfo } from "@/lib/types";
 import { getSessionId } from "@/lib/types";
@@ -40,15 +40,14 @@ import SessionList from "@/components/SessionList";
 
 const Terminal = dynamic(() => import("@/components/Terminal"), { ssr: false });
 const MessageView = dynamic(() => import("@/components/MessageView"), { ssr: false });
+const GraphView = dynamic(() => import("@/components/GraphView"), { ssr: false });
 
-type ViewMode = "terminal" | "messages";
+type ViewMode = "terminal" | "messages" | "graph";
 
 export default function Home() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionStatus, setSessionStatus] = useState<"running" | "exited">("running");
-  const [messageSessions, setMessageSessions] = useState<MessageSession[]>([]);
-  const [selectedMessageSession, setSelectedMessageSession] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("terminal");
   const [command, setCommand] = useState("");
@@ -56,6 +55,7 @@ export default function Home() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [messageCount, setMessageCount] = useState<number>(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -79,22 +79,26 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [selectedSessionId]);
 
+  // Fetch message count for the selected session
   useEffect(() => {
-    async function loadMessageSessions() {
+    async function fetchMessageCount() {
+      if (!selectedSessionId) {
+        setMessageCount(0);
+        return;
+      }
       try {
-        const data = await listMessageSessions();
-        setMessageSessions(data);
-        if (data.length > 0 && !selectedMessageSession) {
-          setSelectedMessageSession(data[0].session_id);
-        }
+        const count = await getSessionMessageCount(selectedSessionId);
+        setMessageCount(count);
       } catch (e) {
-        console.error("Failed to load message sessions:", e);
+        console.error("Failed to fetch message count:", e);
+        setMessageCount(0);
       }
     }
-    loadMessageSessions();
-    const interval = setInterval(loadMessageSessions, 10000);
+    fetchMessageCount();
+    // Refresh count periodically
+    const interval = setInterval(fetchMessageCount, 10000);
     return () => clearInterval(interval);
-  }, [selectedMessageSession]);
+  }, [selectedSessionId]);
 
   const handleSelectSession = (id: string) => {
     setSelectedSessionId(id || null);
@@ -115,9 +119,10 @@ export default function Home() {
       }
 
       // Build the message with image paths and text
+      // Use \r (carriage return) to trigger Enter in terminal, not \n (line feed)
       const parts = [...imagePaths, command.trim()].filter(Boolean);
       if (parts.length > 0) {
-        await sendInput(selectedSessionId, parts.join(" ") + "\n");
+        await sendInput(selectedSessionId, parts.join(" ") + "\r");
       }
 
       setCommand("");
@@ -257,7 +262,7 @@ export default function Home() {
           </button>
 
           <span className="text-[13px] font-medium text-zinc-100">
-            {viewMode === "terminal" ? "Terminal" : "Messages"}
+            {viewMode === "terminal" ? "Terminal" : viewMode === "messages" ? "Messages" : "Knowledge Graph"}
           </span>
 
           {viewMode === "terminal" && sessions.length > 0 && (
@@ -278,6 +283,15 @@ export default function Home() {
                   ))}
                 </SelectContent>
               </Select>
+            </>
+          )}
+
+          {viewMode === "messages" && selectedSessionId && (
+            <>
+              <span className="text-zinc-600">/</span>
+              <span className="text-[12px] text-zinc-400 font-mono">
+                {sessions.find(s => getSessionId(s) === selectedSessionId)?.name || selectedSessionId.slice(0, 12)}
+              </span>
             </>
           )}
         </div>
@@ -301,11 +315,20 @@ export default function Home() {
           >
             <MessageSquare className="w-3 h-3" />
             <span className="hidden sm:inline">Messages</span>
-            {messageSessions.length > 0 && (
-              <span className="text-[10px] text-zinc-500">
-                {messageSessions.reduce((sum, s) => sum + s.message_count, 0)}
+            {messageCount > 0 && (
+              <span className="ml-0.5 px-1.5 py-0.5 min-w-[18px] text-center text-[10px] font-medium bg-zinc-700 text-zinc-200 rounded-full">
+                {messageCount > 99 ? "99+" : messageCount}
               </span>
             )}
+          </button>
+          <button
+            onClick={() => setViewMode("graph")}
+            className={`flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors ${
+              viewMode === "graph" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            <Network className="w-3 h-3" />
+            <span className="hidden sm:inline">Graph</span>
           </button>
         </div>
       </header>
@@ -326,40 +349,51 @@ export default function Home() {
         {/* Content */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-hidden">
-            {viewMode === "terminal" && selectedSessionId ? (
-              <Terminal
-                sessionId={selectedSessionId}
-                onExit={() => setSessionStatus("exited")}
-                onError={(err) => setError(err)}
-              />
-            ) : selectedMessageSession ? (
-              <MessageView sessionId={selectedMessageSession} />
-            ) : (
-              <div className="h-full flex items-center justify-center">
-                <div className="text-center">
-                  {viewMode === "terminal" ? (
-                    <>
-                      <TerminalIcon className="w-6 h-6 mx-auto mb-2 text-zinc-700" />
-                      <p className="text-[12px] text-zinc-500">No session selected</p>
-                      <button
-                        onClick={() => setSidebarOpen(true)}
-                        className="mt-2 text-[11px] text-zinc-500 hover:text-zinc-300 underline underline-offset-2"
-                      >
-                        Open sessions
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <MessageSquare className="w-6 h-6 mx-auto mb-2 text-zinc-700" />
-                      <p className="text-[12px] text-zinc-500">No messages</p>
-                    </>
-                  )}
+            {viewMode === "terminal" ? (
+              selectedSessionId ? (
+                <Terminal
+                  sessionId={selectedSessionId}
+                  onExit={() => setSessionStatus("exited")}
+                  onError={(err) => setError(err)}
+                />
+              ) : (
+                <div className="h-full flex items-center justify-center">
+                  <div className="text-center">
+                    <TerminalIcon className="w-6 h-6 mx-auto mb-2 text-zinc-700" />
+                    <p className="text-[12px] text-zinc-500">No session selected</p>
+                    <button
+                      onClick={() => setSidebarOpen(true)}
+                      className="mt-2 text-[11px] text-zinc-500 hover:text-zinc-300 underline underline-offset-2"
+                    >
+                      Open sessions
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )
+            ) : viewMode === "messages" ? (
+              selectedSessionId ? (
+                <MessageView key={selectedSessionId} sessionId={selectedSessionId} />
+              ) : (
+                <div className="h-full flex items-center justify-center">
+                  <div className="text-center">
+                    <MessageSquare className="w-6 h-6 mx-auto mb-2 text-zinc-700" />
+                    <p className="text-[12px] text-zinc-500">No session selected</p>
+                    <button
+                      onClick={() => setSidebarOpen(true)}
+                      className="mt-2 text-[11px] text-zinc-500 hover:text-zinc-300 underline underline-offset-2"
+                    >
+                      Open sessions
+                    </button>
+                  </div>
+                </div>
+              )
+            ) : (
+              <GraphView />
             )}
           </div>
 
-          {/* Input bar */}
+          {/* Input bar - hidden in graph mode */}
+          {viewMode !== "graph" && (
           <div className="border-t border-zinc-800 p-2.5 bg-zinc-950">
             {error && (
               <div className="mb-2 px-2.5 py-1.5 text-[12px] text-red-400 bg-red-950/50 rounded flex items-center justify-between">
@@ -388,7 +422,7 @@ export default function Home() {
               </button>
               <div className="w-px h-4 bg-zinc-800 mx-1" />
               <button
-                onClick={() => handleSendKey("\n")}
+                onClick={() => handleSendKey("\r")}
                 disabled={sessionStatus !== "running"}
                 className="p-1.5 rounded bg-zinc-100 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
@@ -489,6 +523,7 @@ export default function Home() {
               </button>
             </form>
           </div>
+          )}
         </div>
       </div>
     </div>

@@ -517,6 +517,44 @@ export async function getSessionMessages(
 }
 
 /**
+ * Get message count for a session (efficient count query).
+ */
+export async function getSessionMessageCount(sessionId: string): Promise<number> {
+  const supabaseUrl = getSupabaseUrl();
+  const supabaseKey = getSupabaseAnonKey();
+
+  if (!supabaseUrl || !supabaseKey) {
+    return 0;
+  }
+
+  try {
+    const response = await fetch(
+      `${supabaseUrl}/rest/v1/claude_code_messages?session_id=eq.${encodeURIComponent(sessionId)}&select=count`,
+      {
+        method: "HEAD",
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+          Prefer: "count=exact",
+        },
+      }
+    );
+
+    const countHeader = response.headers.get("content-range");
+    if (countHeader) {
+      // Format is "0-N/total" or "*/total" when there are no results
+      const match = countHeader.match(/\/(\d+)$/);
+      if (match) {
+        return parseInt(match[1], 10);
+      }
+    }
+    return 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Answer a pending question from Claude.
  */
 export async function answerQuestion(

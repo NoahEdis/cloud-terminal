@@ -9,6 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "d3": "^7.9.0",
+    "d3-force": "^3.0.0",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-scroll-area": "^1.2.10",
@@ -30,6 +32,7 @@
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
+    "@types/d3": "^7.4.3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
