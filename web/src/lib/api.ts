@@ -1125,3 +1125,82 @@ export async function getCredentialsStats(): Promise<CredentialsStats> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
+
+// ============================================================================
+// User Settings API - Persisted settings (Supabase-backed)
+// ============================================================================
+
+/**
+ * Get all user settings from Supabase.
+ * Falls back to localStorage if API fails.
+ */
+export async function getPersistedSettings(): Promise<Record<string, unknown>> {
+  try {
+    const res = await fetch(`${getApiUrl()}/api/settings`, {
+      headers: headers(),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  } catch (err) {
+    console.error("Failed to fetch settings from server:", err);
+    // Fall back to localStorage
+    return getLocalSettings();
+  }
+}
+
+/**
+ * Save all user settings to Supabase (replaces all settings).
+ * Also saves to localStorage as backup.
+ */
+export async function savePersistedSettings(settings: Record<string, unknown>): Promise<void> {
+  // Always save to localStorage as backup
+  saveLocalSettings(settings);
+
+  try {
+    const res = await fetch(`${getApiUrl()}/api/settings`, {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify(settings),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (err) {
+    console.error("Failed to save settings to server:", err);
+  }
+}
+
+/**
+ * Update specific settings in Supabase (merges with existing).
+ */
+export async function updatePersistedSettings(updates: Record<string, unknown>): Promise<void> {
+  // Update localStorage
+  const localSettings = getLocalSettings();
+  saveLocalSettings({ ...localSettings, ...updates });
+
+  try {
+    const res = await fetch(`${getApiUrl()}/api/settings`, {
+      method: "PATCH",
+      headers: headers(),
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (err) {
+    console.error("Failed to update settings on server:", err);
+  }
+}
+
+// localStorage helpers for settings
+const SETTINGS_KEY = "terminal_user_settings";
+
+function getLocalSettings(): Record<string, unknown> {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalSettings(settings: Record<string, unknown>): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}

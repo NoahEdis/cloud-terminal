@@ -605,3 +605,81 @@ export async function isCredentialTracked(accountName: string, credentialName: s
     return false;
   }
 }
+
+// ============================================================================
+// User Settings
+// ============================================================================
+
+/**
+ * User settings row type matching the database schema.
+ */
+export interface UserSettings {
+  id: string;
+  user_id: string;
+  settings: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+const DEFAULT_USER_ID = "default";
+
+/**
+ * Get user settings from Supabase.
+ */
+export async function getSettings(userId: string = DEFAULT_USER_ID): Promise<Record<string, unknown>> {
+  if (!isSupabaseEnabled()) return {};
+
+  try {
+    const results = await supabaseRequest<UserSettings[]>("GET", "/user_settings", {
+      searchParams: {
+        user_id: `eq.${userId}`,
+        select: "settings",
+      },
+    });
+    return results[0]?.settings || {};
+  } catch (error) {
+    console.error("[Supabase] Failed to get user settings:", error);
+    return {};
+  }
+}
+
+/**
+ * Save user settings to Supabase.
+ */
+export async function saveSettings(settings: Record<string, unknown>, userId: string = DEFAULT_USER_ID): Promise<void> {
+  if (!isSupabaseEnabled()) return;
+
+  try {
+    // Upsert settings using POST with ON CONFLICT
+    await supabaseRequest("POST", "/user_settings", {
+      body: {
+        user_id: userId,
+        settings,
+        updated_at: new Date().toISOString(),
+      },
+      headers: {
+        Prefer: "resolution=merge-duplicates",
+      },
+    });
+    console.log(`[Supabase] Saved user settings for ${userId}`);
+  } catch (error) {
+    console.error("[Supabase] Failed to save user settings:", error);
+    throw error;
+  }
+}
+
+/**
+ * Update specific settings keys (merges with existing settings).
+ */
+export async function updateSettings(updates: Record<string, unknown>, userId: string = DEFAULT_USER_ID): Promise<void> {
+  if (!isSupabaseEnabled()) return;
+
+  try {
+    const existingSettings = await getSettings(userId);
+    const mergedSettings = { ...existingSettings, ...updates };
+    await saveSettings(mergedSettings, userId);
+  } catch (error) {
+    console.error("[Supabase] Failed to update user settings:", error);
+    throw error;
+  }
+}

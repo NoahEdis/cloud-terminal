@@ -851,7 +851,7 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
             )}
             {savedFilters.length === 0 ? (
               <div className="px-2 py-3 text-[11px] text-zinc-500 text-center">
-                No saved filters. Select a node and use "Focus on this" to create one.
+                No saved filters. Select a node and use &quot;Focus on this&quot; to create one.
               </div>
             ) : (
               savedFilters.map((filter) => (

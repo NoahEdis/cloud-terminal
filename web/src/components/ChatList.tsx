@@ -56,6 +56,8 @@ import {
   searchArchivedSessions,
   removeArchivedSession,
   clearArchivedSessions,
+  getPersistedSettings,
+  updatePersistedSettings,
   type ArchivedSession,
 } from "@/lib/api";
 import type { SessionInfo, SessionConfig, ActivityState, SessionMetrics, ChatType } from "@/lib/types";
@@ -205,18 +207,32 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
     setSessionNamesState(getSessionNames());
     setSessionFoldersState(getSessionFolders());
     setFoldersState(getFoldersList());
+
+    // Load settings from localStorage first for immediate UI
     const storedUrl = localStorage.getItem("terminalApiUrl");
     const storedKey = localStorage.getItem("terminalApiKey");
     const storedOpenaiKey = localStorage.getItem("openaiApiKey");
     const storedGeminiKey = localStorage.getItem("geminiApiKey");
+    const storedSkipPermissions = localStorage.getItem("claudeSkipPermissions");
+
     setApiUrl(storedUrl || getDefaultApiUrl());
     setApiKey(storedKey ?? getDefaultApiKey());
     setOpenaiApiKey(storedOpenaiKey || "");
     setGeminiApiKey(storedGeminiKey || "");
-    // Load Claude Code settings
-    const storedSkipPermissions = localStorage.getItem("claudeSkipPermissions");
     setSkipPermissions(storedSkipPermissions !== "false"); // Default to true
     setLocalStorageLoaded(true);
+
+    // Then load persisted settings from Supabase (overrides localStorage if available)
+    getPersistedSettings().then((settings) => {
+      if (settings.openaiApiKey) setOpenaiApiKey(settings.openaiApiKey as string);
+      if (settings.geminiApiKey) setGeminiApiKey(settings.geminiApiKey as string);
+      if (settings.claudeSkipPermissions !== undefined) setSkipPermissions(settings.claudeSkipPermissions as boolean);
+      // Note: API URL and API key are intentionally NOT synced from server
+      // as they need to be local to connect to the server in the first place
+    }).catch((err) => {
+      console.error("Failed to load persisted settings:", err);
+    });
+
     fetchSessions();
 
     const interval = setInterval(fetchSessions, 2000);
@@ -477,13 +493,25 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
     setEditName("");
   };
 
-  const saveSettings = () => {
+  const saveSettings = async () => {
+    // Save to localStorage (for API URL/key needed to connect)
     localStorage.setItem("terminalApiUrl", apiUrl);
     localStorage.setItem("terminalApiKey", apiKey);
     localStorage.setItem("openaiApiKey", openaiApiKey);
     localStorage.setItem("geminiApiKey", geminiApiKey);
-    // Save Claude Code settings
     localStorage.setItem("claudeSkipPermissions", skipPermissions.toString());
+
+    // Persist API keys and settings to Supabase for cross-device/deploy persistence
+    try {
+      await updatePersistedSettings({
+        openaiApiKey,
+        geminiApiKey,
+        claudeSkipPermissions: skipPermissions,
+      });
+    } catch (err) {
+      console.error("Failed to persist settings:", err);
+    }
+
     setShowSettings(false);
     fetchSessions();
   };
