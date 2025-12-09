@@ -158,8 +158,10 @@ function filterTerminalResponses(data: string): string {
   filtered = filtered.replace(/(?<![a-zA-Z0-9])\?[\d;]+c(?![a-zA-Z0-9])/g, "");
   filtered = filtered.replace(/(?<![a-zA-Z0-9])>[\d;]+c(?![a-zA-Z0-9])/g, "");
 
-  // Clean up any resulting empty data
-  return filtered.trim() || filtered;
+  // Return the filtered data.
+  // NOTE: We intentionally do NOT trim() here because \r and \n are
+  // essential for sending Enter/newline to the terminal.
+  return filtered;
 }
 
 export class TmuxSessionManager {
@@ -169,6 +171,8 @@ export class TmuxSessionManager {
   private syncInterval: NodeJS.Timeout | null = null;
   private cleanupInterval: NodeJS.Timeout | null = null;
   private tmuxAvailable = false;
+  // Track logged deduplication fingerprints to avoid repeated logs
+  private loggedDeduplicationFingerprints = new Map<string, string>(); // fingerprint -> kept session name
 
   /**
    * Initialize the session manager.
@@ -197,10 +201,106 @@ export class TmuxSessionManager {
   }
 
   /**
+   * Deduplicate sessions that share the same panes (linked windows).
+   * When multiple sessions share the same pane PIDs, keep only one:
+   * - Prefer attached sessions
+   * - Otherwise prefer the oldest session (by creation time)
+   * - Otherwise prefer the session we're already tracking
+   */
+  private async deduplicateSessions(sessions: tmux.TmuxSession[]): Promise<tmux.TmuxSession[]> {
+    if (sessions.length <= 1) return sessions;
+
+    // Group sessions by their pane fingerprint (sorted PIDs)
+    const fingerprintToSessions = new Map<string, tmux.TmuxSession[]>();
+    // Sessions with no fingerprint (empty panes or error) - include separately
+    const noFingerprintSessions: tmux.TmuxSession[] = [];
+
+    for (const session of sessions) {
+      const fingerprint = await tmux.getSessionPaneFingerprint(session.name);
+      if (!fingerprint) {
+        // Session has no panes yet (race condition) or command failed - include it anyway
+        noFingerprintSessions.push(session);
+        continue;
+      }
+
+      const group = fingerprintToSessions.get(fingerprint) || [];
+      group.push(session);
+      fingerprintToSessions.set(fingerprint, group);
+    }
+
+    // For each group, pick the best session
+    const result: tmux.TmuxSession[] = [];
+
+    for (const [fingerprint, group] of fingerprintToSessions) {
+      if (group.length === 1) {
+        result.push(group[0]);
+        continue;
+      }
+
+      // Multiple sessions share the same panes - pick the best one
+      // Priority: attached > already tracked > oldest
+      let best = group[0];
+
+      for (const session of group) {
+        // Prefer attached sessions
+        if (session.attached && !best.attached) {
+          best = session;
+          continue;
+        }
+        if (!session.attached && best.attached) {
+          continue;
+        }
+
+        // Prefer sessions we're already tracking
+        const sessionTracked = this.sessions.has(session.name);
+        const bestTracked = this.sessions.has(best.name);
+        if (sessionTracked && !bestTracked) {
+          best = session;
+          continue;
+        }
+        if (!sessionTracked && bestTracked) {
+          continue;
+        }
+
+        // Prefer oldest session
+        if (session.created < best.created) {
+          best = session;
+        }
+      }
+
+      // Log deduplication only if this is new or changed
+      const duplicates = group.filter(s => s.name !== best.name).map(s => s.name);
+      if (duplicates.length > 0) {
+        const previousBest = this.loggedDeduplicationFingerprints.get(fingerprint);
+        if (previousBest !== best.name) {
+          console.log(`[TmuxSessionManager] Deduplicating sessions with shared panes. Keeping: ${best.name}, hiding: ${duplicates.join(", ")}`);
+          this.loggedDeduplicationFingerprints.set(fingerprint, best.name);
+        }
+      } else {
+        // No longer a duplicate group - clean up tracking
+        this.loggedDeduplicationFingerprints.delete(fingerprint);
+      }
+
+      result.push(best);
+    }
+
+    // Include sessions that had no fingerprint (couldn't deduplicate them)
+    result.push(...noFingerprintSessions);
+
+    return result;
+  }
+
+  /**
    * Sync with tmux to discover new/removed/renamed sessions.
+   * Includes deduplication to filter out sessions with shared/linked windows.
    */
   async syncTmuxSessions(): Promise<void> {
-    const tmuxSessions = await tmux.listSessions();
+    const allTmuxSessions = await tmux.listSessions();
+
+    // Deduplicate sessions with shared panes (linked windows)
+    // Sessions that share the same pane PIDs are duplicates
+    const tmuxSessions = await this.deduplicateSessions(allTmuxSessions);
+
     const tmuxNames = new Set(tmuxSessions.map(s => s.name));
     const tmuxIds = new Set(tmuxSessions.map(s => s.id));
 
@@ -519,7 +619,11 @@ export class TmuxSessionManager {
     // handling with readline-based apps like Claude Code.
     // The literal=true flag splits on newlines and sends Enter as a key name,
     // which works more reliably than writing \r directly to a PTY.
-    tmux.sendKeys(name, filteredData, true);
+    // Note: We don't await here because the API returns synchronously,
+    // but the tmux commands are executed asynchronously in sequence.
+    tmux.sendKeys(name, filteredData, true).catch(err => {
+      console.error(`[TmuxSessionManager write] sendKeys error for ${name}:`, err);
+    });
 
     return true;
   }

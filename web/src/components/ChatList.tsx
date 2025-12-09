@@ -25,6 +25,7 @@ import {
   AlertTriangle,
   Bot,
   Key,
+  MonitorSmartphone,
 } from "lucide-react";
 import {
   listSessions,
@@ -81,6 +82,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import {
   Tooltip,
   TooltipContent,
@@ -599,12 +608,61 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
     return () => clearInterval(interval);
   }, []);
 
+  // Render session menu items (shared between dropdown and context menu)
+  const renderSessionMenuItems = (sessionId: string, isContextMenu: boolean) => {
+    const MenuItem = isContextMenu ? ContextMenuItem : DropdownMenuItem;
+    const MenuSeparator = isContextMenu ? ContextMenuSeparator : DropdownMenuSeparator;
+    const MenuLabel = isContextMenu ? ContextMenuLabel : DropdownMenuLabel;
+
+    return (
+      <>
+        <MenuItem onClick={() => handleRename(sessionId, sessionNames[sessionId] || "")} className="text-[12px]">
+          <Pencil className="w-3 h-3 mr-2" />
+          Rename
+        </MenuItem>
+        <MenuItem onClick={() => handleEditDescription("session", sessionId)} className="text-[12px]">
+          <Pencil className="w-3 h-3 mr-2" />
+          {sessionDescriptions[sessionId] ? "Edit Description" : "Add Description"}
+        </MenuItem>
+        {folders.length > 0 && (
+          <>
+            <MenuSeparator className="bg-zinc-800" />
+            <MenuLabel className="text-[11px] text-zinc-500">Move to folder</MenuLabel>
+            <MenuItem
+              onClick={() => handleMoveToFolder(sessionId, "")}
+              className={`text-[12px] ${!sessionFolders[sessionId] ? "text-zinc-100" : ""}`}
+            >
+              (No folder)
+            </MenuItem>
+            {folders.map((folder) => (
+              <MenuItem
+                key={folder}
+                onClick={() => handleMoveToFolder(sessionId, folder)}
+                className={`text-[12px] ${sessionFolders[sessionId] === folder ? "text-zinc-100" : ""}`}
+              >
+                {folder}
+              </MenuItem>
+            ))}
+          </>
+        )}
+        <MenuSeparator className="bg-zinc-800" />
+        <MenuItem
+          onClick={() => handleKill(sessionId)}
+          className="text-[12px] text-red-400 focus:text-red-400"
+        >
+          <Trash2 className="w-3 h-3 mr-2" />
+          Kill Session
+        </MenuItem>
+      </>
+    );
+  };
+
   const renderSession = (session: SessionInfo) => {
     const sessionId = getSessionId(session);
     const isDragging = draggedSessionId === sessionId;
-    return (
+
+    const sessionContent = (
       <div
-        key={sessionId}
         onClick={() => onSelect(sessionId)}
         draggable
         onDragStart={() => handleDragStart(sessionId)}
@@ -644,17 +702,26 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
             </div>
           ) : (
             <>
-              <div className="flex items-center gap-2 flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
                 <ActivityIndicator state={session.activityState} />
                 <span className="truncate text-[12px] font-medium text-zinc-200">
                   {getDisplayName(session)}
                 </span>
                 {session.source === "local" && session.attached && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">attached</span>
+                  <Tooltip delayDuration={800}>
+                    <TooltipTrigger asChild>
+                      <span className="flex-shrink-0">
+                        <MonitorSmartphone className="w-3 h-3 text-zinc-500" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="bg-zinc-800 text-zinc-200 text-[11px] border-zinc-700">
+                      Attached locally via tmux
+                    </TooltipContent>
+                  </Tooltip>
                 )}
               </div>
               <div
-                className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center"
+                className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center ml-1"
                 onClick={(e) => e.stopPropagation()}
               >
                 <DropdownMenu>
@@ -664,43 +731,7 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-44 bg-zinc-900 border-zinc-800">
-                    <DropdownMenuItem onClick={() => handleRename(sessionId, sessionNames[sessionId] || "")} className="text-[12px]">
-                      <Pencil className="w-3 h-3 mr-2" />
-                      Rename
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleEditDescription("session", sessionId)} className="text-[12px]">
-                      <Pencil className="w-3 h-3 mr-2" />
-                      {sessionDescriptions[sessionId] ? "Edit Description" : "Add Description"}
-                    </DropdownMenuItem>
-                    {folders.length > 0 && (
-                      <>
-                        <DropdownMenuSeparator className="bg-zinc-800" />
-                        <DropdownMenuLabel className="text-[11px] text-zinc-500">Move to folder</DropdownMenuLabel>
-                        <DropdownMenuItem
-                          onClick={() => handleMoveToFolder(sessionId, "")}
-                          className={`text-[12px] ${!sessionFolders[sessionId] ? "text-zinc-100" : ""}`}
-                        >
-                          (No folder)
-                        </DropdownMenuItem>
-                        {folders.map((folder) => (
-                          <DropdownMenuItem
-                            key={folder}
-                            onClick={() => handleMoveToFolder(sessionId, folder)}
-                            className={`text-[12px] ${sessionFolders[sessionId] === folder ? "text-zinc-100" : ""}`}
-                          >
-                            {folder}
-                          </DropdownMenuItem>
-                        ))}
-                      </>
-                    )}
-                    <DropdownMenuSeparator className="bg-zinc-800" />
-                    <DropdownMenuItem
-                      onClick={() => handleKill(sessionId)}
-                      className="text-[12px] text-red-400 focus:text-red-400"
-                    >
-                      <Trash2 className="w-3 h-3 mr-2" />
-                      Kill Session
-                    </DropdownMenuItem>
+                    {renderSessionMenuItems(sessionId, false)}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -726,6 +757,17 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
           <span className="flex-shrink-0 whitespace-nowrap">{formatTime(session.lastActivity)}</span>
         </div>
       </div>
+    );
+
+    return (
+      <ContextMenu key={sessionId}>
+        <ContextMenuTrigger asChild>
+          {sessionContent}
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-44 bg-zinc-900 border-zinc-800">
+          {renderSessionMenuItems(sessionId, true)}
+        </ContextMenuContent>
+      </ContextMenu>
     );
   };
 

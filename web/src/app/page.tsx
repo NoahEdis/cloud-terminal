@@ -48,12 +48,18 @@ const GraphView = dynamic(() => import("@/components/GraphView"), { ssr: false }
 
 type ViewMode = "terminal" | "messages" | "graph";
 
+const MIN_SIDEBAR_WIDTH = 200;
+const MAX_SIDEBAR_WIDTH = 500;
+const DEFAULT_SIDEBAR_WIDTH = 288; // 18rem = 288px (w-72)
+
 export default function Home() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionStatus, setSessionStatus] = useState<"running" | "exited">("running");
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
+  const [isResizing, setIsResizing] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("messages");
   const [command, setCommand] = useState("");
   const [pendingImages, setPendingImages] = useState<Array<{ dataUrl: string; name: string }>>([]);
@@ -66,6 +72,7 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const sidebarRef = useRef<HTMLDivElement>(null);
 
   // Migrate localStorage keys and start connection health checking on mount
   useEffect(() => {
@@ -133,6 +140,38 @@ export default function Home() {
     const interval = setInterval(fetchMessageCount, 10000);
     return () => clearInterval(interval);
   }, [selectedSessionId]);
+
+  // Sidebar resize handlers
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, e.clientX));
+      setSidebarWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    }
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isResizing]);
 
   const handleSelectSession = (id: string) => {
     setSelectedSessionId(id || null);
@@ -385,14 +424,26 @@ export default function Home() {
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar */}
         <div
-          className={`flex-shrink-0 border-r border-zinc-800 bg-black overflow-hidden transition-all duration-200 ${
-            sidebarOpen ? "w-72" : "w-0 border-r-0"
-          }`}
+          ref={sidebarRef}
+          style={{ width: sidebarOpen ? sidebarWidth : 0 }}
+          className={`flex-shrink-0 border-r border-zinc-800 bg-black overflow-hidden ${
+            isResizing ? "" : "transition-all duration-200"
+          } ${!sidebarOpen ? "border-r-0" : ""}`}
         >
-          <div className="w-72 h-full">
+          <div style={{ width: sidebarWidth }} className="h-full">
             <ChatList selectedId={selectedSessionId} onSelect={handleSelectSession} />
           </div>
         </div>
+
+        {/* Resize handle */}
+        {sidebarOpen && (
+          <div
+            onMouseDown={handleMouseDown}
+            className={`w-1 hover:w-1.5 bg-transparent hover:bg-zinc-700 cursor-col-resize flex-shrink-0 transition-all ${
+              isResizing ? "w-1.5 bg-zinc-600" : ""
+            }`}
+          />
+        )}
 
         {/* Content */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">

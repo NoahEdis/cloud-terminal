@@ -86,6 +86,38 @@ export async function listSessions(): Promise<TmuxSession[]> {
 }
 
 /**
+ * Get all pane PIDs for a session.
+ * Used for deduplication - sessions with shared panes are duplicates.
+ */
+export async function getSessionPanePids(name: string): Promise<number[]> {
+  try {
+    // Note: Do NOT use -a flag here. -a lists panes from ALL sessions, ignoring -t.
+    // We want panes only from the target session for proper fingerprinting.
+    const { stdout } = await execAsync(
+      `tmux list-panes -t '${escapeTmuxName(name)}' -F '#{pane_pid}' 2>/dev/null`
+    );
+    return stdout
+      .trim()
+      .split("\n")
+      .filter(line => line.length > 0)
+      .map(pid => parseInt(pid, 10))
+      .filter(pid => !isNaN(pid))
+      .sort((a, b) => a - b);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get pane fingerprint for a session (sorted, comma-separated PIDs).
+ * Sessions with the same fingerprint share windows/panes.
+ */
+export async function getSessionPaneFingerprint(name: string): Promise<string> {
+  const pids = await getSessionPanePids(name);
+  return pids.join(",");
+}
+
+/**
  * Check if a session with the given name exists.
  */
 export async function sessionExists(name: string): Promise<boolean> {
@@ -193,7 +225,8 @@ export async function sendKeys(name: string, keys: string, literal: boolean = fa
       await execAsync(`tmux send-keys -t '${target}' '${escapeShellArg(keys)}'`);
     }
     return true;
-  } catch {
+  } catch (err) {
+    console.error(`[Tmux sendKeys] Error:`, err);
     return false;
   }
 }
