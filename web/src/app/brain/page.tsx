@@ -170,6 +170,77 @@ export default function BrainPage() {
   const totalNodes = nodes.length;
   const totalCategories = groupedNodes.length;
 
+  // Graph view as fullscreen early return
+  if (viewMode === "graph") {
+    return (
+      <div className="h-screen flex flex-col bg-black text-zinc-100">
+        {/* Minimal header for graph view */}
+        <header className="flex items-center justify-between h-11 px-3 border-b border-zinc-800 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setViewMode("list")}
+              className="p-1.5 -ml-1.5 rounded hover:bg-zinc-800 transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4 text-zinc-400" />
+            </button>
+            <Brain className="w-4 h-4 text-zinc-400" />
+            <span className="text-[13px] font-medium text-zinc-100">Brain Graph</span>
+            <span className="text-zinc-600">/</span>
+            <span className="text-[12px] text-zinc-500">
+              {totalNodes} node{totalNodes !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <button
+            onClick={() => setViewMode("list")}
+            className="flex items-center gap-1.5 px-2.5 h-7 text-[12px] rounded border border-zinc-800 hover:bg-zinc-800 transition-colors text-zinc-400"
+          >
+            <List className="w-3 h-3" />
+            List View
+          </button>
+        </header>
+        {/* Full height graph container */}
+        <div className="flex-1 relative">
+          {loading && nodes.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-zinc-500">
+              <Loader2 className="w-5 h-5 animate-spin mb-3 text-zinc-600" />
+              <p className="text-[12px]">Loading brain nodes...</p>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center h-full">
+              <div className="p-2 rounded-full bg-red-500/10 mb-3">
+                <X className="w-4 h-4 text-red-400" />
+              </div>
+              <p className="text-[12px] text-red-400 mb-3">{error}</p>
+              <button
+                onClick={loadNodes}
+                className="text-[12px] text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
+              >
+                Try again
+              </button>
+            </div>
+          ) : nodes.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-zinc-500">
+              <Brain className="w-6 h-6 mb-3 text-zinc-600" />
+              <p className="text-[12px] mb-1">No brain nodes yet</p>
+              <button
+                onClick={() => router.push("/brain/add")}
+                className="text-[11px] text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
+              >
+                Add brain node
+              </button>
+            </div>
+          ) : (
+            <BrainGraph
+              nodes={nodes}
+              searchQuery={searchQuery}
+              onNodeClick={(node) => router.push(`/brain/${node.id}`)}
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen flex flex-col bg-black text-zinc-100">
       {/* Header */}
@@ -193,18 +264,14 @@ export default function BrainPage() {
         <div className="flex items-center h-7 rounded-md border border-zinc-800 overflow-hidden">
           <button
             onClick={() => setViewMode("list")}
-            className={`flex items-center gap-1.5 px-2.5 h-full text-[12px] transition-colors ${
-              viewMode === "list" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
-            }`}
+            className="flex items-center gap-1.5 px-2.5 h-full text-[12px] transition-colors bg-zinc-800 text-zinc-100"
           >
             <List className="w-3 h-3" />
             <span className="hidden sm:inline">List</span>
           </button>
           <button
             onClick={() => setViewMode("graph")}
-            className={`flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors ${
-              viewMode === "graph" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
-            }`}
+            className="flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors text-zinc-500 hover:text-zinc-300"
           >
             <LayoutGrid className="w-3 h-3" />
             <span className="hidden sm:inline">Graph</span>
@@ -254,46 +321,6 @@ export default function BrainPage() {
       </div>
 
       {/* Content */}
-      {viewMode === "graph" ? (
-        <div className="flex-1 overflow-hidden">
-          {loading && nodes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-zinc-500">
-              <Loader2 className="w-5 h-5 animate-spin mb-3 text-zinc-600" />
-              <p className="text-[12px]">Loading brain nodes...</p>
-            </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center h-full">
-              <div className="p-2 rounded-full bg-red-500/10 mb-3">
-                <X className="w-4 h-4 text-red-400" />
-              </div>
-              <p className="text-[12px] text-red-400 mb-3">{error}</p>
-              <button
-                onClick={loadNodes}
-                className="text-[12px] text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
-              >
-                Try again
-              </button>
-            </div>
-          ) : nodes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-zinc-500">
-              <Brain className="w-6 h-6 mb-3 text-zinc-600" />
-              <p className="text-[12px] mb-1">No brain nodes yet</p>
-              <button
-                onClick={() => router.push("/brain/add")}
-                className="text-[11px] text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
-              >
-                Add brain node
-              </button>
-            </div>
-          ) : (
-            <BrainGraph
-              nodes={nodes}
-              searchQuery={searchQuery}
-              onNodeClick={(node) => router.push(`/brain/${node.id}`)}
-            />
-          )}
-        </div>
-      ) : (
       <ScrollArea className="flex-1">
         <div className="p-3">
           {loading && nodes.length === 0 ? (
@@ -467,7 +494,6 @@ export default function BrainPage() {
           )}
         </div>
       </ScrollArea>
-      )}
     </div>
   );
 }
