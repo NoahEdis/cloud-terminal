@@ -8,6 +8,12 @@ import type {
   CredentialsGraphData,
   CredentialsStats,
 } from "./credential-types";
+import type {
+  BrainNode,
+  BrainNodeInput,
+  BrainNodeUpdate,
+  BrainNodeFilters,
+} from "./brain-types";
 
 // ============================================================================
 // localStorage Migration - Migrate old "session" keys to new "chat" keys
@@ -1203,4 +1209,165 @@ function getLocalSettings(): Record<string, unknown> {
 function saveLocalSettings(settings: Record<string, unknown>): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+// ============================================================================
+// Brain API - Knowledge management for reasoning, preferences, workflows
+// ============================================================================
+
+/**
+ * Graph data structure for brain visualization.
+ */
+export interface BrainGraphData {
+  nodes: {
+    id: string;
+    label: string;
+    type: string;
+    category: string | null;
+    priority: number;
+  }[];
+  edges: {
+    source: string;
+    target: string;
+    type: "parent-child" | "related";
+  }[];
+}
+
+/**
+ * Statistics about brain nodes.
+ */
+export interface BrainStats {
+  total: number;
+  by_type: Record<string, number>;
+  by_category: Record<string, number>;
+  by_source: Record<string, number>;
+  active: number;
+  inactive: number;
+}
+
+/**
+ * Get all brain nodes with optional filters.
+ */
+export async function getBrainNodes(filters?: BrainNodeFilters): Promise<BrainNode[]> {
+  const params = new URLSearchParams();
+  if (filters?.node_type) params.set("node_type", filters.node_type);
+  if (filters?.category) params.set("category", filters.category);
+  if (filters?.source_type) params.set("source_type", filters.source_type);
+  if (filters?.is_active !== undefined) params.set("is_active", String(filters.is_active));
+
+  const queryString = params.toString();
+  const url = `${getApiUrl()}/api/brain${queryString ? `?${queryString}` : ""}`;
+
+  const res = await fetch(url, { headers: headers() });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Get a single brain node by ID.
+ */
+export async function getBrainNode(id: string): Promise<BrainNode> {
+  const res = await fetch(`${getApiUrl()}/api/brain/${encodeURIComponent(id)}`, {
+    headers: headers(),
+  });
+  if (!res.ok) {
+    if (res.status === 404) throw new Error("Brain node not found");
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Create a new brain node.
+ */
+export async function createBrainNode(input: BrainNodeInput): Promise<BrainNode> {
+  const res = await fetch(`${getApiUrl()}/api/brain`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Update an existing brain node.
+ */
+export async function updateBrainNode(
+  id: string,
+  updates: BrainNodeUpdate
+): Promise<BrainNode> {
+  const res = await fetch(`${getApiUrl()}/api/brain/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    if (res.status === 404) throw new Error("Brain node not found");
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Delete a brain node.
+ */
+export async function deleteBrainNode(id: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/api/brain/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: headers(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+}
+
+/**
+ * Search brain nodes by text query.
+ */
+export async function searchBrainNodes(query: string): Promise<BrainNode[]> {
+  const res = await fetch(
+    `${getApiUrl()}/api/brain/search?q=${encodeURIComponent(query)}`,
+    { headers: headers() }
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Get all unique brain node categories.
+ */
+export async function getBrainCategories(): Promise<string[]> {
+  const res = await fetch(`${getApiUrl()}/api/brain/categories`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Get brain node statistics.
+ */
+export async function getBrainStats(): Promise<BrainStats> {
+  const res = await fetch(`${getApiUrl()}/api/brain/stats`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Get graph visualization data for brain nodes.
+ */
+export async function getBrainGraph(): Promise<BrainGraphData> {
+  const res = await fetch(`${getApiUrl()}/api/brain/graph`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }

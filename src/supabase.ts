@@ -683,3 +683,467 @@ export async function updateSettings(updates: Record<string, unknown>, userId: s
     throw error;
   }
 }
+
+// ============================================================================
+// Brain Knowledge Nodes (using neo4j.graph_nodes)
+// ============================================================================
+
+/**
+ * Brain node type classification.
+ * These map to Neo4j labels: ["BrainNode", "<NodeType>"]
+ */
+export type BrainNodeType = "reasoning" | "preference" | "workflow" | "principle" | "pattern" | "reference";
+
+/**
+ * Brain source type.
+ */
+export type BrainSourceType = "github" | "manual" | "inferred" | "imported";
+
+/**
+ * Brain node as stored in neo4j.graph_nodes.
+ * The properties JSONB contains all brain-specific fields.
+ */
+interface GraphNodeRow {
+  id: string;
+  neo4j_id: number | null;
+  external_id: string | null;
+  labels: string[];
+  properties: {
+    title: string;
+    content: string;
+    summary?: string;
+    node_type: BrainNodeType;
+    source_type: BrainSourceType;
+    source_url?: string;
+    source_path?: string;
+    source_commit?: string;
+    category?: string;
+    tags?: string[];
+    parent_id?: string;
+    related_ids?: string[];
+    priority?: number;
+    is_active?: boolean;
+    last_synced_at?: string;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Brain node type matching the frontend/API interface.
+ */
+export interface BrainNode {
+  id: string;
+  node_type: BrainNodeType;
+  title: string;
+  content: string;
+  summary: string | null;
+  source_type: BrainSourceType;
+  source_url: string | null;
+  source_path: string | null;
+  source_commit: string | null;
+  category: string | null;
+  tags: string[];
+  parent_id: string | null;
+  related_ids: string[];
+  priority: number;
+  is_active: boolean;
+  last_synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Input type for creating a brain node.
+ */
+export interface BrainNodeInput {
+  node_type: BrainNodeType;
+  title: string;
+  content: string;
+  summary?: string;
+  source_type?: BrainSourceType;
+  source_url?: string;
+  source_path?: string;
+  source_commit?: string;
+  category?: string;
+  tags?: string[];
+  parent_id?: string;
+  related_ids?: string[];
+  priority?: number;
+}
+
+/**
+ * Input type for updating a brain node.
+ */
+export interface BrainNodeUpdate {
+  node_type?: BrainNodeType;
+  title?: string;
+  content?: string;
+  summary?: string;
+  source_type?: BrainSourceType;
+  source_url?: string;
+  source_path?: string;
+  source_commit?: string;
+  category?: string;
+  tags?: string[];
+  parent_id?: string | null;
+  related_ids?: string[];
+  priority?: number;
+  is_active?: boolean;
+}
+
+/**
+ * Convert a GraphNodeRow to BrainNode.
+ */
+function graphNodeToBrainNode(row: GraphNodeRow): BrainNode {
+  const props = row.properties;
+  return {
+    id: row.id,
+    node_type: props.node_type,
+    title: props.title,
+    content: props.content,
+    summary: props.summary || null,
+    source_type: props.source_type || "manual",
+    source_url: props.source_url || null,
+    source_path: props.source_path || null,
+    source_commit: props.source_commit || null,
+    category: props.category || null,
+    tags: props.tags || [],
+    parent_id: props.parent_id || null,
+    related_ids: props.related_ids || [],
+    priority: props.priority ?? 0,
+    is_active: props.is_active ?? true,
+    last_synced_at: props.last_synced_at || null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+/**
+ * Generate external_id for brain nodes.
+ */
+function generateBrainExternalId(nodeType: BrainNodeType, title: string): string {
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").substring(0, 50);
+  return `brain:${nodeType}:${slug}`;
+}
+
+/**
+ * Make a request to the neo4j schema in Supabase.
+ */
+async function neo4jRequest<T>(
+  method: string,
+  path: string,
+  options: {
+    body?: unknown;
+    headers?: Record<string, string>;
+    searchParams?: Record<string, string>;
+  } = {}
+): Promise<T> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    throw new Error("Supabase not configured: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required");
+  }
+
+  const url = new URL(`${SUPABASE_URL}/rest/v1${path}`);
+  if (options.searchParams) {
+    for (const [key, value] of Object.entries(options.searchParams)) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  const response = await fetch(url.toString(), {
+    method,
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      "Prefer": "return=representation",
+      "Accept-Profile": "neo4j",
+      "Content-Profile": "neo4j",
+      ...options.headers,
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Supabase neo4j request failed (${response.status}): ${error}`);
+  }
+
+  const text = await response.text();
+  if (!text) return [] as T;
+  return JSON.parse(text);
+}
+
+/**
+ * Get all brain nodes.
+ */
+export async function getBrainNodes(filters?: {
+  node_type?: BrainNodeType;
+  category?: string;
+  source_type?: BrainSourceType;
+  is_active?: boolean;
+}): Promise<BrainNode[]> {
+  if (!isSupabaseEnabled()) return [];
+
+  try {
+    const searchParams: Record<string, string> = {
+      "labels": "cs.{BrainNode}",
+      order: "updated_at.desc",
+    };
+
+    // Build filter conditions for properties JSONB
+    const conditions: string[] = [];
+    if (filters?.node_type) {
+      conditions.push(`properties->node_type.eq.${filters.node_type}`);
+    }
+    if (filters?.category) {
+      conditions.push(`properties->category.eq.${filters.category}`);
+    }
+    if (filters?.source_type) {
+      conditions.push(`properties->source_type.eq.${filters.source_type}`);
+    }
+    if (filters?.is_active !== undefined) {
+      conditions.push(`properties->is_active.eq.${filters.is_active}`);
+    }
+
+    // If we have additional filters, they need to be combined differently
+    // For now, we'll filter in-memory after fetching
+    const rows = await neo4jRequest<GraphNodeRow[]>("GET", "/graph_nodes", { searchParams });
+
+    let nodes = rows.map(graphNodeToBrainNode);
+
+    // Apply filters
+    if (filters?.node_type) {
+      nodes = nodes.filter(n => n.node_type === filters.node_type);
+    }
+    if (filters?.category) {
+      nodes = nodes.filter(n => n.category === filters.category);
+    }
+    if (filters?.source_type) {
+      nodes = nodes.filter(n => n.source_type === filters.source_type);
+    }
+    if (filters?.is_active !== undefined) {
+      nodes = nodes.filter(n => n.is_active === filters.is_active);
+    }
+
+    // Sort by priority desc, then created_at desc
+    nodes.sort((a, b) => {
+      if (b.priority !== a.priority) return b.priority - a.priority;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+
+    return nodes;
+  } catch (error) {
+    console.error("[Supabase] Failed to get brain nodes:", error);
+    return [];
+  }
+}
+
+/**
+ * Get a brain node by ID.
+ */
+export async function getBrainNode(id: string): Promise<BrainNode | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    const results = await neo4jRequest<GraphNodeRow[]>("GET", "/graph_nodes", {
+      searchParams: {
+        id: `eq.${id}`,
+        "labels": "cs.{BrainNode}",
+      },
+    });
+    if (results.length === 0) return null;
+    return graphNodeToBrainNode(results[0]);
+  } catch (error) {
+    console.error(`[Supabase] Failed to get brain node ${id}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Create a new brain node.
+ */
+export async function createBrainNode(input: BrainNodeInput): Promise<BrainNode | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    const nodeType = input.node_type;
+    const nodeTypeLabel = nodeType.charAt(0).toUpperCase() + nodeType.slice(1);
+
+    const properties = {
+      title: input.title,
+      content: input.content,
+      summary: input.summary || null,
+      node_type: input.node_type,
+      source_type: input.source_type || "manual",
+      source_url: input.source_url || null,
+      source_path: input.source_path || null,
+      source_commit: input.source_commit || null,
+      category: input.category || null,
+      tags: input.tags || [],
+      parent_id: input.parent_id || null,
+      related_ids: input.related_ids || [],
+      priority: input.priority ?? 0,
+      is_active: true,
+    };
+
+    const results = await neo4jRequest<GraphNodeRow[]>("POST", "/graph_nodes", {
+      body: {
+        external_id: generateBrainExternalId(input.node_type, input.title),
+        labels: ["BrainNode", nodeTypeLabel],
+        properties,
+      },
+    });
+
+    console.log(`[Supabase] Created brain node: ${input.title}`);
+    return results[0] ? graphNodeToBrainNode(results[0]) : null;
+  } catch (error) {
+    console.error("[Supabase] Failed to create brain node:", error);
+    throw error;
+  }
+}
+
+/**
+ * Update a brain node.
+ */
+export async function updateBrainNode(id: string, updates: BrainNodeUpdate): Promise<BrainNode | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    // First get the existing node
+    const existing = await getBrainNode(id);
+    if (!existing) return null;
+
+    // Merge properties
+    const nodeType = updates.node_type || existing.node_type;
+    const nodeTypeLabel = nodeType.charAt(0).toUpperCase() + nodeType.slice(1);
+
+    const properties = {
+      title: updates.title ?? existing.title,
+      content: updates.content ?? existing.content,
+      summary: updates.summary !== undefined ? updates.summary : existing.summary,
+      node_type: nodeType,
+      source_type: updates.source_type ?? existing.source_type,
+      source_url: updates.source_url !== undefined ? updates.source_url : existing.source_url,
+      source_path: updates.source_path !== undefined ? updates.source_path : existing.source_path,
+      source_commit: updates.source_commit !== undefined ? updates.source_commit : existing.source_commit,
+      category: updates.category !== undefined ? updates.category : existing.category,
+      tags: updates.tags ?? existing.tags,
+      parent_id: updates.parent_id !== undefined ? updates.parent_id : existing.parent_id,
+      related_ids: updates.related_ids ?? existing.related_ids,
+      priority: updates.priority ?? existing.priority,
+      is_active: updates.is_active ?? existing.is_active,
+      last_synced_at: existing.last_synced_at,
+    };
+
+    const results = await neo4jRequest<GraphNodeRow[]>("PATCH", "/graph_nodes", {
+      searchParams: { id: `eq.${id}` },
+      body: {
+        labels: ["BrainNode", nodeTypeLabel],
+        properties,
+      },
+    });
+
+    console.log(`[Supabase] Updated brain node: ${id}`);
+    return results[0] ? graphNodeToBrainNode(results[0]) : null;
+  } catch (error) {
+    console.error(`[Supabase] Failed to update brain node ${id}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a brain node.
+ */
+export async function deleteBrainNode(id: string): Promise<void> {
+  if (!isSupabaseEnabled()) return;
+
+  try {
+    await neo4jRequest("DELETE", "/graph_nodes", {
+      searchParams: { id: `eq.${id}` },
+    });
+    console.log(`[Supabase] Deleted brain node: ${id}`);
+  } catch (error) {
+    console.error(`[Supabase] Failed to delete brain node ${id}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Search brain nodes by text.
+ */
+export async function searchBrainNodes(query: string): Promise<BrainNode[]> {
+  if (!isSupabaseEnabled()) return [];
+
+  try {
+    // Get all brain nodes and filter in memory for text search
+    const allNodes = await getBrainNodes({ is_active: true });
+    const queryLower = query.toLowerCase();
+
+    return allNodes.filter(node =>
+      node.title.toLowerCase().includes(queryLower) ||
+      node.content.toLowerCase().includes(queryLower) ||
+      (node.summary && node.summary.toLowerCase().includes(queryLower)) ||
+      node.tags.some(tag => tag.toLowerCase().includes(queryLower))
+    );
+  } catch (error) {
+    console.error("[Supabase] Failed to search brain nodes:", error);
+    return [];
+  }
+}
+
+/**
+ * Get all unique categories for brain nodes.
+ */
+export async function getBrainCategories(): Promise<string[]> {
+  if (!isSupabaseEnabled()) return [];
+
+  try {
+    const nodes = await getBrainNodes({ is_active: true });
+    const categories = new Set(nodes.map(n => n.category).filter((c): c is string => c !== null));
+    return Array.from(categories).sort();
+  } catch (error) {
+    console.error("[Supabase] Failed to get brain categories:", error);
+    return [];
+  }
+}
+
+/**
+ * Get brain nodes statistics.
+ */
+export async function getBrainStats(): Promise<{
+  total: number;
+  byType: Record<string, number>;
+  byCategory: Record<string, number>;
+  bySourceType: Record<string, number>;
+}> {
+  if (!isSupabaseEnabled()) {
+    return { total: 0, byType: {}, byCategory: {}, bySourceType: {} };
+  }
+
+  try {
+    const nodes = await getBrainNodes({ is_active: true });
+
+    const byType: Record<string, number> = {};
+    const byCategory: Record<string, number> = {};
+    const bySourceType: Record<string, number> = {};
+
+    for (const node of nodes) {
+      byType[node.node_type] = (byType[node.node_type] || 0) + 1;
+      if (node.category) {
+        byCategory[node.category] = (byCategory[node.category] || 0) + 1;
+      }
+      bySourceType[node.source_type] = (bySourceType[node.source_type] || 0) + 1;
+    }
+
+    return {
+      total: nodes.length,
+      byType,
+      byCategory,
+      bySourceType,
+    };
+  } catch (error) {
+    console.error("[Supabase] Failed to get brain stats:", error);
+    return { total: 0, byType: {}, byCategory: {}, bySourceType: {} };
+  }
+}
