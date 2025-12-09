@@ -1147,3 +1147,472 @@ export async function getBrainStats(): Promise<{
     return { total: 0, byType: {}, byCategory: {}, bySourceType: {} };
   }
 }
+
+// ============================================================================
+// Integration Hierarchy (Applications, Organizations, Credentials)
+// ============================================================================
+
+/**
+ * Generic graph node row type.
+ */
+interface GenericGraphNode {
+  id: string;
+  neo4j_id: number | null;
+  external_id: string | null;
+  labels: string[];
+  properties: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Graph relationship row type.
+ */
+interface GraphRelationship {
+  id: string;
+  neo4j_id: number | null;
+  type: string;
+  source_node_id: string;
+  target_node_id: string;
+  properties: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Application node interface.
+ */
+export interface ApplicationNode {
+  id: string;
+  name: string;
+  svg_logo: string | null;
+  simple_icon_slug: string | null;
+  icon_url: string | null;
+  category: string | null;
+  url: string | null;
+  api_docs_md: string | null;
+}
+
+/**
+ * Organization node interface.
+ */
+export interface OrganizationNode {
+  id: string;
+  name: string;
+  display_name: string;
+  vault_id: string | null;
+  vault_name: string | null;
+}
+
+/**
+ * Credential node interface.
+ */
+export interface CredentialNode {
+  id: string;
+  name: string;
+  service_name: string | null;
+  item_id: string | null;
+  field_label: string | null;
+  notes: string | null;
+  api_docs_md: string | null;
+  tracked_credential_id: string | null;
+}
+
+/**
+ * Integration hierarchy structure.
+ */
+export interface IntegrationHierarchy {
+  applications: Array<{
+    application: ApplicationNode;
+    organizations: Array<{
+      organization: OrganizationNode;
+      credentials: CredentialNode[];
+    }>;
+  }>;
+}
+
+/**
+ * Get all Application nodes from the graph.
+ */
+export async function getApplicationNodes(): Promise<ApplicationNode[]> {
+  if (!isSupabaseEnabled()) return [];
+
+  try {
+    const rows = await neo4jRequest<GenericGraphNode[]>("GET", "/graph_nodes", {
+      searchParams: {
+        "labels": "cs.{Application}",
+        order: "properties->>name.asc",
+      },
+    });
+
+    return rows.map(row => ({
+      id: row.id,
+      name: (row.properties.name as string) || "Unknown",
+      svg_logo: (row.properties.svg_logo as string) || null,
+      simple_icon_slug: (row.properties.simple_icon_slug as string) || null,
+      icon_url: (row.properties.icon_url as string) || null,
+      category: (row.properties.category as string) || null,
+      url: (row.properties.url as string) || null,
+      api_docs_md: (row.properties.api_docs_md as string) || null,
+    }));
+  } catch (error) {
+    console.error("[Supabase] Failed to get application nodes:", error);
+    return [];
+  }
+}
+
+/**
+ * Find an Application node by name (case-insensitive).
+ */
+export async function findApplicationByName(name: string): Promise<ApplicationNode | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    const apps = await getApplicationNodes();
+    const nameLower = name.toLowerCase();
+    return apps.find(a => a.name.toLowerCase() === nameLower) || null;
+  } catch (error) {
+    console.error(`[Supabase] Failed to find application by name ${name}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Find a graph node by external_id.
+ */
+export async function findNodeByExternalId(externalId: string): Promise<GenericGraphNode | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    const rows = await neo4jRequest<GenericGraphNode[]>("GET", "/graph_nodes", {
+      searchParams: {
+        external_id: `eq.${externalId}`,
+      },
+    });
+    return rows[0] || null;
+  } catch (error) {
+    console.error(`[Supabase] Failed to find node by external_id ${externalId}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Create an Organization node.
+ */
+export async function createOrganizationNode(org: {
+  name: string;
+  display_name: string;
+  vault_id?: string;
+  vault_name?: string;
+}): Promise<GenericGraphNode | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    const externalId = `org:${org.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
+    // Check if already exists
+    const existing = await findNodeByExternalId(externalId);
+    if (existing) return existing;
+
+    const results = await neo4jRequest<GenericGraphNode[]>("POST", "/graph_nodes", {
+      body: {
+        external_id: externalId,
+        labels: ["Organization", "Account"],
+        properties: {
+          name: org.name,
+          display_name: org.display_name,
+          vault_id: org.vault_id || null,
+          vault_name: org.vault_name || null,
+          type: "1password_account",
+        },
+      },
+    });
+    console.log(`[Supabase] Created organization node: ${org.name}`);
+    return results[0] || null;
+  } catch (error) {
+    console.error("[Supabase] Failed to create organization node:", error);
+    throw error;
+  }
+}
+
+/**
+ * Create a Credential node in the graph.
+ */
+export async function createCredentialNode(cred: {
+  name: string;
+  service_name?: string;
+  item_id?: string;
+  field_label?: string;
+  notes?: string;
+  api_docs_md?: string;
+  account_name: string;
+}): Promise<GenericGraphNode | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    const externalId = `cred:${cred.account_name}:${cred.name}`.toLowerCase().replace(/[^a-z0-9:]+/g, "-");
+
+    // Check if already exists
+    const existing = await findNodeByExternalId(externalId);
+    if (existing) return existing;
+
+    const results = await neo4jRequest<GenericGraphNode[]>("POST", "/graph_nodes", {
+      body: {
+        external_id: externalId,
+        labels: ["Credential", "APIKey"],
+        properties: {
+          name: cred.name,
+          service_name: cred.service_name || null,
+          item_id: cred.item_id || null,
+          field_label: cred.field_label || null,
+          notes: cred.notes || null,
+          api_docs_md: cred.api_docs_md || null,
+          account_name: cred.account_name,
+        },
+      },
+    });
+    console.log(`[Supabase] Created credential node: ${cred.name}`);
+    return results[0] || null;
+  } catch (error) {
+    console.error("[Supabase] Failed to create credential node:", error);
+    throw error;
+  }
+}
+
+/**
+ * Create a relationship between two nodes.
+ */
+export async function createGraphRelationship(
+  sourceId: string,
+  targetId: string,
+  type: string,
+  properties: Record<string, unknown> = {}
+): Promise<GraphRelationship | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    // Check if relationship already exists
+    const existing = await neo4jRequest<GraphRelationship[]>("GET", "/graph_relationships", {
+      searchParams: {
+        source_node_id: `eq.${sourceId}`,
+        target_node_id: `eq.${targetId}`,
+        type: `eq.${type}`,
+      },
+    });
+    if (existing.length > 0) return existing[0];
+
+    const results = await neo4jRequest<GraphRelationship[]>("POST", "/graph_relationships", {
+      body: {
+        source_node_id: sourceId,
+        target_node_id: targetId,
+        type,
+        properties,
+      },
+    });
+    console.log(`[Supabase] Created relationship: ${type}`);
+    return results[0] || null;
+  } catch (error) {
+    console.error(`[Supabase] Failed to create relationship ${type}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Get all Organization nodes.
+ */
+export async function getOrganizationNodes(): Promise<OrganizationNode[]> {
+  if (!isSupabaseEnabled()) return [];
+
+  try {
+    const rows = await neo4jRequest<GenericGraphNode[]>("GET", "/graph_nodes", {
+      searchParams: {
+        "labels": "cs.{Organization}",
+        order: "properties->>name.asc",
+      },
+    });
+
+    return rows.map(row => ({
+      id: row.id,
+      name: (row.properties.name as string) || "Unknown",
+      display_name: (row.properties.display_name as string) || (row.properties.name as string) || "Unknown",
+      vault_id: (row.properties.vault_id as string) || null,
+      vault_name: (row.properties.vault_name as string) || null,
+    }));
+  } catch (error) {
+    console.error("[Supabase] Failed to get organization nodes:", error);
+    return [];
+  }
+}
+
+/**
+ * Get all Credential nodes.
+ */
+export async function getCredentialNodes(): Promise<CredentialNode[]> {
+  if (!isSupabaseEnabled()) return [];
+
+  try {
+    const rows = await neo4jRequest<GenericGraphNode[]>("GET", "/graph_nodes", {
+      searchParams: {
+        "labels": "cs.{Credential}",
+        order: "properties->>name.asc",
+      },
+    });
+
+    return rows.map(row => ({
+      id: row.id,
+      name: (row.properties.name as string) || "Unknown",
+      service_name: (row.properties.service_name as string) || null,
+      item_id: (row.properties.item_id as string) || null,
+      field_label: (row.properties.field_label as string) || null,
+      notes: (row.properties.notes as string) || null,
+      api_docs_md: (row.properties.api_docs_md as string) || null,
+      tracked_credential_id: (row.properties.tracked_credential_id as string) || null,
+    }));
+  } catch (error) {
+    console.error("[Supabase] Failed to get credential nodes:", error);
+    return [];
+  }
+}
+
+/**
+ * Get all graph relationships.
+ */
+export async function getGraphRelationships(type?: string): Promise<GraphRelationship[]> {
+  if (!isSupabaseEnabled()) return [];
+
+  try {
+    const searchParams: Record<string, string> = {};
+    if (type) {
+      searchParams.type = `eq.${type}`;
+    }
+
+    return await neo4jRequest<GraphRelationship[]>("GET", "/graph_relationships", { searchParams });
+  } catch (error) {
+    console.error("[Supabase] Failed to get graph relationships:", error);
+    return [];
+  }
+}
+
+/**
+ * Get the full integration hierarchy: Application -> Organization -> Credential.
+ * Works by tracing AUTHENTICATES relationships backwards to build the tree.
+ */
+export async function getIntegrationHierarchy(): Promise<IntegrationHierarchy> {
+  if (!isSupabaseEnabled()) {
+    return { applications: [] };
+  }
+
+  try {
+    // Fetch all data in parallel
+    const [applications, organizations, credentials, relationships] = await Promise.all([
+      getApplicationNodes(),
+      getOrganizationNodes(),
+      getCredentialNodes(),
+      getGraphRelationships(),
+    ]);
+
+    // Build lookup maps
+    const appById = new Map(applications.map(a => [a.id, a]));
+    const orgById = new Map(organizations.map(o => [o.id, o]));
+    const credById = new Map(credentials.map(c => [c.id, c]));
+
+    // Build relationship maps
+    const credToOrg = new Map<string, string>(); // Credential -> Organization (via HAS_CREDENTIAL)
+    const credToApps = new Map<string, Set<string>>(); // Credential -> Applications (AUTHENTICATES)
+
+    for (const rel of relationships) {
+      if (rel.type === "HAS_CREDENTIAL") {
+        // source is org, target is credential
+        credToOrg.set(rel.target_node_id, rel.source_node_id);
+      } else if (rel.type === "AUTHENTICATES") {
+        // source is credential, target is application
+        if (!credToApps.has(rel.source_node_id)) {
+          credToApps.set(rel.source_node_id, new Set());
+        }
+        credToApps.get(rel.source_node_id)!.add(rel.target_node_id);
+      }
+    }
+
+    // Build hierarchy by grouping credentials by app and org
+    // For each app, find all credentials that authenticate to it, then group by org
+    const appData = new Map<string, Map<string, CredentialNode[]>>();
+
+    for (const [credId, appIds] of credToApps) {
+      const cred = credById.get(credId);
+      if (!cred) continue;
+
+      const orgId = credToOrg.get(credId);
+      if (!orgId) continue;
+
+      for (const appId of appIds) {
+        if (!appData.has(appId)) {
+          appData.set(appId, new Map());
+        }
+        const appOrgs = appData.get(appId)!;
+        if (!appOrgs.has(orgId)) {
+          appOrgs.set(orgId, []);
+        }
+        appOrgs.get(orgId)!.push(cred);
+      }
+    }
+
+    // Build final hierarchy structure
+    const hierarchy: IntegrationHierarchy = { applications: [] };
+
+    for (const [appId, orgMap] of appData) {
+      const app = appById.get(appId);
+      if (!app) continue;
+
+      const appOrgs: Array<{
+        organization: OrganizationNode;
+        credentials: CredentialNode[];
+      }> = [];
+
+      for (const [orgId, creds] of orgMap) {
+        const org = orgById.get(orgId);
+        if (!org) continue;
+
+        appOrgs.push({
+          organization: org,
+          credentials: creds,
+        });
+      }
+
+      if (appOrgs.length > 0) {
+        hierarchy.applications.push({
+          application: app,
+          organizations: appOrgs,
+        });
+      }
+    }
+
+    // Sort by app name
+    hierarchy.applications.sort((a, b) => a.application.name.localeCompare(b.application.name));
+
+    return hierarchy;
+  } catch (error) {
+    console.error("[Supabase] Failed to get integration hierarchy:", error);
+    return { applications: [] };
+  }
+}
+
+/**
+ * Update tracked_credentials with credential_node_id.
+ */
+export async function linkTrackedCredentialToNode(
+  trackedCredentialId: string,
+  credentialNodeId: string
+): Promise<void> {
+  if (!isSupabaseEnabled()) return;
+
+  try {
+    await supabaseRequest("PATCH", "/tracked_credentials", {
+      searchParams: { id: `eq.${trackedCredentialId}` },
+      body: { credential_node_id: credentialNodeId },
+    });
+    console.log(`[Supabase] Linked tracked credential ${trackedCredentialId} to node ${credentialNodeId}`);
+  } catch (error) {
+    console.error(`[Supabase] Failed to link tracked credential:`, error);
+    throw error;
+  }
+}

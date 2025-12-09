@@ -14,6 +14,8 @@ import {
   RefreshCw,
   Trash2,
   X,
+  Plug,
+  FolderTree,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -29,15 +31,16 @@ import {
 } from "@/lib/api";
 import type { TrackedCredential, CredentialsByAccount } from "@/lib/credential-types";
 import { CredentialsGraph } from "@/components/CredentialsGraph";
+import { IntegrationTree } from "@/components/IntegrationTree";
 
-export default function CredentialsPage() {
+export default function IntegrationsPage() {
   const router = useRouter();
   const [credentials, setCredentials] = useState<TrackedCredential[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
-  const [viewMode, setViewMode] = useState<"list" | "graph">("list");
+  const [viewMode, setViewMode] = useState<"list" | "tree" | "graph">("tree");
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
 
   // Load credentials
@@ -134,12 +137,63 @@ export default function CredentialsPage() {
 
   const totalCredentials = credentials.length;
   const totalAccounts = groupedCredentials.length;
-  const isGraphView = viewMode === "graph";
 
-  if (isGraphView) {
+  // Full-screen graph view
+  if (viewMode === "graph") {
     return (
       <div className="h-screen bg-black">
-        <CredentialsGraph onClose={() => setViewMode("list")} />
+        <CredentialsGraph onClose={() => setViewMode("tree")} />
+      </div>
+    );
+  }
+
+  // Tree view (hierarchical: Application → Organization → Credential)
+  if (viewMode === "tree") {
+    return (
+      <div className="h-screen flex flex-col bg-black text-zinc-100">
+        {/* Header */}
+        <header className="flex items-center justify-between h-11 px-3 border-b border-zinc-800">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => router.push("/")}
+              className="p-1.5 -ml-1.5 rounded hover:bg-zinc-800 transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4 text-zinc-400" />
+            </button>
+            <Plug className="w-4 h-4 text-zinc-400" />
+            <span className="text-[13px] font-medium text-zinc-100">Integrations</span>
+          </div>
+
+          {/* View switcher */}
+          <div className="flex items-center h-7 rounded-md border border-zinc-800 overflow-hidden">
+            <button
+              onClick={() => setViewMode("tree")}
+              className="flex items-center gap-1.5 px-2.5 h-full text-[12px] transition-colors bg-zinc-800 text-zinc-100"
+            >
+              <FolderTree className="w-3 h-3" />
+              <span className="hidden sm:inline">Tree</span>
+            </button>
+            <button
+              onClick={() => setViewMode("list")}
+              className="flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors text-zinc-500 hover:text-zinc-300"
+            >
+              <List className="w-3 h-3" />
+              <span className="hidden sm:inline">List</span>
+            </button>
+            <button
+              onClick={() => setViewMode("graph")}
+              className="flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors text-zinc-500 hover:text-zinc-300"
+            >
+              <LayoutGrid className="w-3 h-3" />
+              <span className="hidden sm:inline">Graph</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Tree content */}
+        <div className="flex-1 overflow-hidden">
+          <IntegrationTree />
+        </div>
       </div>
     );
   }
@@ -155,7 +209,8 @@ export default function CredentialsPage() {
           >
             <ArrowLeft className="w-4 h-4 text-zinc-400" />
           </button>
-          <span className="text-[13px] font-medium text-zinc-100">Credentials</span>
+          <Plug className="w-4 h-4 text-zinc-400" />
+          <span className="text-[13px] font-medium text-zinc-100">Integrations</span>
           <span className="text-zinc-600">/</span>
           <span className="text-[12px] text-zinc-500">
             {totalCredentials} across {totalAccounts} account{totalAccounts !== 1 ? "s" : ""}
@@ -164,6 +219,13 @@ export default function CredentialsPage() {
 
         {/* View switcher */}
         <div className="flex items-center h-7 rounded-md border border-zinc-800 overflow-hidden">
+          <button
+            onClick={() => setViewMode("tree")}
+            className="flex items-center gap-1.5 px-2.5 h-full text-[12px] border-r border-zinc-800 transition-colors text-zinc-500 hover:text-zinc-300"
+          >
+            <FolderTree className="w-3 h-3" />
+            <span className="hidden sm:inline">Tree</span>
+          </button>
           <button
             onClick={() => setViewMode("list")}
             className="flex items-center gap-1.5 px-2.5 h-full text-[12px] transition-colors bg-zinc-800 text-zinc-100"
@@ -201,7 +263,7 @@ export default function CredentialsPage() {
           <RefreshCw className={`w-3.5 h-3.5 text-zinc-400 ${loading ? "animate-spin" : ""}`} />
         </button>
         <button
-          onClick={() => router.push("/credentials/add")}
+          onClick={() => router.push("/integrations/add")}
           className="flex items-center gap-1.5 h-8 px-3 text-[12px] rounded border border-zinc-800 hover:bg-zinc-800 transition-colors text-zinc-300"
         >
           <Plus className="w-3.5 h-3.5" />
@@ -239,15 +301,15 @@ export default function CredentialsPage() {
                 </>
               ) : (
                 <>
-                  <p className="text-[12px] mb-1">No credentials tracked yet</p>
+                  <p className="text-[12px] mb-1">No integrations tracked yet</p>
                   <p className="text-[11px] text-zinc-600 mb-3">
-                    Add credentials from your 1Password accounts
+                    Add integrations from your 1Password accounts
                   </p>
                   <button
-                    onClick={() => router.push("/credentials/add")}
+                    onClick={() => router.push("/integrations/add")}
                     className="text-[11px] text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
                   >
-                    Add credentials
+                    Add integrations
                   </button>
                 </>
               )}

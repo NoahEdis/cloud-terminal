@@ -7,6 +7,10 @@ import type {
   AccountDetails,
   CredentialsGraphData,
   CredentialsStats,
+  ApplicationNode,
+  OrganizationNode,
+  CredentialNode,
+  IntegrationHierarchy,
 } from "./credential-types";
 import type {
   BrainNode,
@@ -1129,6 +1133,179 @@ export async function getCredentialsStats(): Promise<CredentialsStats> {
     headers: headers(),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// ============================================================================
+// Integration Hierarchy API - Application → Organization → Credential
+// ============================================================================
+
+/**
+ * Get all application nodes with logos.
+ */
+export async function getApplications(): Promise<ApplicationNode[]> {
+  const res = await fetch(`${getApiUrl()}/api/credentials/applications`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Get a single application by name.
+ */
+export async function getApplication(name: string): Promise<ApplicationNode> {
+  const res = await fetch(
+    `${getApiUrl()}/api/credentials/applications/${encodeURIComponent(name)}`,
+    { headers: headers() }
+  );
+  if (!res.ok) {
+    if (res.status === 404) throw new Error("Application not found");
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Get the full integration hierarchy.
+ * Returns a tree: Application → Organization → Credential
+ */
+export async function getIntegrationHierarchy(): Promise<IntegrationHierarchy> {
+  const res = await fetch(`${getApiUrl()}/api/credentials/hierarchy`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Get all organization nodes.
+ */
+export async function getOrganizations(): Promise<OrganizationNode[]> {
+  const res = await fetch(`${getApiUrl()}/api/credentials/organizations`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Create a new organization node.
+ */
+export async function createOrganization(
+  name: string,
+  displayName: string,
+  vaultId?: string,
+  vaultName?: string
+): Promise<OrganizationNode> {
+  const res = await fetch(`${getApiUrl()}/api/credentials/organizations`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      name,
+      display_name: displayName,
+      vault_id: vaultId,
+      vault_name: vaultName,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Get all credential nodes from the graph.
+ */
+export async function getCredentialNodes(): Promise<CredentialNode[]> {
+  const res = await fetch(`${getApiUrl()}/api/credentials/credential-nodes`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Create a new credential node.
+ */
+export async function createCredentialNode(
+  accountName: string,
+  credentialName: string,
+  options?: {
+    serviceName?: string;
+    itemId?: string;
+    fieldLabel?: string;
+    notes?: string;
+    apiDocsMd?: string;
+    trackedCredentialId?: string;
+  }
+): Promise<CredentialNode> {
+  const res = await fetch(`${getApiUrl()}/api/credentials/credential-nodes`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      account_name: accountName,
+      credential_name: credentialName,
+      service_name: options?.serviceName,
+      item_id: options?.itemId,
+      field_label: options?.fieldLabel,
+      notes: options?.notes,
+      api_docs_md: options?.apiDocsMd,
+      tracked_credential_id: options?.trackedCredentialId,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Create a graph relationship between two nodes.
+ */
+export async function createGraphRelationship(
+  sourceId: string,
+  targetId: string,
+  type: string
+): Promise<{ id: string }> {
+  const res = await fetch(`${getApiUrl()}/api/credentials/relationships`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      source_id: sourceId,
+      target_id: targetId,
+      type,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Link a tracked credential to a graph node.
+ */
+export async function linkCredentialToNode(
+  credentialId: string,
+  nodeId: string
+): Promise<{ success: boolean }> {
+  const res = await fetch(
+    `${getApiUrl()}/api/credentials/tracked/${encodeURIComponent(credentialId)}/link-node`,
+    {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ node_id: nodeId }),
+    }
+  );
+  if (!res.ok) {
+    if (res.status === 404) throw new Error("Credential not found");
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
   return res.json();
 }
 

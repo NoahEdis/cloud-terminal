@@ -9,6 +9,7 @@ import {
   AlertCircle,
   Building2,
   X,
+  Plug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -30,7 +31,7 @@ import type {
   TrackedCredentialInput,
 } from "@/lib/credential-types";
 
-export default function AddCredentialsPage() {
+export default function AddIntegrationsPage() {
   const router = useRouter();
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string>("");
@@ -136,7 +137,7 @@ export default function AddCredentialsPage() {
       );
 
       await addTrackedCredentials(credentials);
-      router.push("/credentials");
+      router.push("/integrations");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add credentials");
     } finally {
@@ -153,12 +154,13 @@ export default function AddCredentialsPage() {
       <header className="flex items-center justify-between h-11 px-3 border-b border-zinc-800">
         <div className="flex items-center gap-2">
           <button
-            onClick={() => router.push("/credentials")}
+            onClick={() => router.push("/integrations")}
             className="p-1.5 -ml-1.5 rounded hover:bg-zinc-800 transition-colors"
           >
             <ArrowLeft className="w-4 h-4 text-zinc-400" />
           </button>
-          <span className="text-[13px] font-medium text-zinc-100">Add Credentials</span>
+          <Plug className="w-4 h-4 text-zinc-400" />
+          <span className="text-[13px] font-medium text-zinc-100">Add Integrations</span>
           <span className="text-zinc-600">/</span>
           <span className="text-[12px] text-zinc-500">
             Select from 1Password
@@ -314,7 +316,7 @@ export default function AddCredentialsPage() {
       <div className="px-3 py-2 border-t border-zinc-800 flex items-center justify-between">
         <Button
           variant="ghost"
-          onClick={() => router.push("/credentials")}
+          onClick={() => router.push("/integrations")}
           className="h-8 px-3 text-[12px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
         >
           Cancel

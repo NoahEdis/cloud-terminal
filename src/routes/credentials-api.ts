@@ -403,3 +403,199 @@ credentialsApi.get("/stats", async (c) => {
     return c.json({ error: "Failed to get statistics" }, 500);
   }
 });
+
+// ============================================================================
+// Integration Hierarchy (Applications → Organizations → Credentials)
+// ============================================================================
+
+/**
+ * GET /applications - List all application nodes with logos
+ * Returns applications from graph_nodes with svg_logo and metadata
+ */
+credentialsApi.get("/applications", async (c) => {
+  try {
+    const applications = await supabase.getApplicationNodes();
+    return c.json(applications);
+  } catch (err) {
+    console.error("[Credentials API] Failed to get applications:", err);
+    return c.json({ error: "Failed to fetch applications" }, 500);
+  }
+});
+
+/**
+ * GET /applications/:name - Get a single application by name
+ */
+credentialsApi.get("/applications/:name", async (c) => {
+  const name = c.req.param("name");
+
+  try {
+    const application = await supabase.findApplicationByName(name);
+    if (!application) {
+      return c.json({ error: "Application not found" }, 404);
+    }
+    return c.json(application);
+  } catch (err) {
+    console.error(`[Credentials API] Failed to get application ${name}:`, err);
+    return c.json({ error: "Failed to fetch application" }, 500);
+  }
+});
+
+/**
+ * GET /hierarchy - Get full integration hierarchy
+ * Returns: Application → Organization → Credential tree structure
+ */
+credentialsApi.get("/hierarchy", async (c) => {
+  try {
+    const hierarchy = await supabase.getIntegrationHierarchy();
+    return c.json(hierarchy);
+  } catch (err) {
+    console.error("[Credentials API] Failed to get integration hierarchy:", err);
+    return c.json({ error: "Failed to fetch integration hierarchy" }, 500);
+  }
+});
+
+/**
+ * GET /organizations - List all organization nodes
+ */
+credentialsApi.get("/organizations", async (c) => {
+  try {
+    const organizations = await supabase.getOrganizationNodes();
+    return c.json(organizations);
+  } catch (err) {
+    console.error("[Credentials API] Failed to get organizations:", err);
+    return c.json({ error: "Failed to fetch organizations" }, 500);
+  }
+});
+
+/**
+ * POST /organizations - Create an organization node
+ * Body: { name, display_name, vault_id?, vault_name? }
+ */
+credentialsApi.post("/organizations", async (c) => {
+  try {
+    const body = await c.req.json<{
+      name: string;
+      display_name: string;
+      vault_id?: string;
+      vault_name?: string;
+    }>();
+
+    if (!body.name || !body.display_name) {
+      return c.json({ error: "name and display_name are required" }, 400);
+    }
+
+    const org = await supabase.createOrganizationNode({
+      name: body.name,
+      display_name: body.display_name,
+      vault_id: body.vault_id,
+      vault_name: body.vault_name,
+    });
+
+    return c.json(org, 201);
+  } catch (err) {
+    console.error("[Credentials API] Failed to create organization:", err);
+    return c.json({ error: "Failed to create organization" }, 500);
+  }
+});
+
+/**
+ * GET /credential-nodes - List all credential nodes from graph
+ */
+credentialsApi.get("/credential-nodes", async (c) => {
+  try {
+    const credentials = await supabase.getCredentialNodes();
+    return c.json(credentials);
+  } catch (err) {
+    console.error("[Credentials API] Failed to get credential nodes:", err);
+    return c.json({ error: "Failed to fetch credential nodes" }, 500);
+  }
+});
+
+/**
+ * POST /credential-nodes - Create a credential node
+ * Body: { account_name, credential_name, service_name?, item_id?, field_label?, notes?, api_docs_md?, tracked_credential_id? }
+ */
+credentialsApi.post("/credential-nodes", async (c) => {
+  try {
+    const body = await c.req.json<{
+      account_name: string;
+      credential_name: string;
+      service_name?: string;
+      item_id?: string;
+      field_label?: string;
+      notes?: string;
+      api_docs_md?: string;
+      tracked_credential_id?: string;
+    }>();
+
+    if (!body.account_name || !body.credential_name) {
+      return c.json({ error: "account_name and credential_name are required" }, 400);
+    }
+
+    const credential = await supabase.createCredentialNode({
+      name: body.credential_name,
+      account_name: body.account_name,
+      service_name: body.service_name,
+      item_id: body.item_id,
+      field_label: body.field_label,
+      notes: body.notes,
+      api_docs_md: body.api_docs_md,
+    });
+
+    return c.json(credential, 201);
+  } catch (err) {
+    console.error("[Credentials API] Failed to create credential node:", err);
+    return c.json({ error: "Failed to create credential node" }, 500);
+  }
+});
+
+/**
+ * POST /relationships - Create a graph relationship
+ * Body: { source_id, target_id, type }
+ */
+credentialsApi.post("/relationships", async (c) => {
+  try {
+    const body = await c.req.json<{
+      source_id: string;
+      target_id: string;
+      type: string;
+    }>();
+
+    if (!body.source_id || !body.target_id || !body.type) {
+      return c.json({ error: "source_id, target_id, and type are required" }, 400);
+    }
+
+    const relationship = await supabase.createGraphRelationship(
+      body.source_id,
+      body.target_id,
+      body.type
+    );
+
+    return c.json(relationship, 201);
+  } catch (err) {
+    console.error("[Credentials API] Failed to create relationship:", err);
+    return c.json({ error: "Failed to create relationship" }, 500);
+  }
+});
+
+/**
+ * POST /tracked/:id/link-node - Link a tracked credential to a graph node
+ * Body: { node_id }
+ */
+credentialsApi.post("/tracked/:id/link-node", async (c) => {
+  const id = c.req.param("id");
+
+  try {
+    const body = await c.req.json<{ node_id: string }>();
+
+    if (!body.node_id) {
+      return c.json({ error: "node_id is required" }, 400);
+    }
+
+    await supabase.linkTrackedCredentialToNode(id, body.node_id);
+    return c.json({ success: true });
+  } catch (err) {
+    console.error(`[Credentials API] Failed to link credential ${id}:`, err);
+    return c.json({ error: "Failed to link credential to node" }, 500);
+  }
+});

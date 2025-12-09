@@ -155,3 +155,63 @@ export interface CredentialsByAccountAndVault {
     credentials: TrackedCredential[];
   }[];
 }
+
+// ============================================================================
+// Integration Hierarchy (Application → Organization → Credential)
+// ============================================================================
+
+/**
+ * An application node from the graph_nodes table.
+ * Applications have logos and API documentation.
+ */
+export interface ApplicationNode {
+  id: string;
+  name: string;
+  svg_logo: string | null;
+  simple_icon_slug: string | null;
+  icon_url: string | null;
+  category: string | null;
+  url: string | null;
+  api_docs_md: string | null;
+}
+
+/**
+ * An organization/account node from the graph_nodes table.
+ * Organizations represent 1Password accounts.
+ */
+export interface OrganizationNode {
+  id: string;
+  name: string;
+  display_name: string;
+  vault_id: string | null;
+  vault_name: string | null;
+}
+
+/**
+ * A credential node from the graph_nodes table.
+ * Credentials link to tracked_credentials and may have API documentation.
+ */
+export interface CredentialNode {
+  id: string;
+  name: string;
+  service_name: string | null;
+  item_id: string | null;
+  field_label: string | null;
+  notes: string | null;
+  api_docs_md: string | null;
+  tracked_credential_id: string | null;
+}
+
+/**
+ * Full integration hierarchy tree structure.
+ * Application → Organization → Credential
+ */
+export interface IntegrationHierarchy {
+  applications: Array<{
+    application: ApplicationNode;
+    organizations: Array<{
+      organization: OrganizationNode;
+      credentials: CredentialNode[];
+    }>;
+  }>;
+}
