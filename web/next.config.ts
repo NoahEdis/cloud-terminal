@@ -15,6 +15,21 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // Redirect old routes to new ones
+  async redirects() {
+    return [
+      {
+        source: "/credentials",
+        destination: "/integrations",
+        permanent: true,
+      },
+      {
+        source: "/credentials/add",
+        destination: "/integrations/add",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
