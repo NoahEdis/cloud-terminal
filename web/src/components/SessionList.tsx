@@ -356,9 +356,18 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
       }
 
       await killSession(id);
-      setSessions((prev) => prev.filter((s) => getSessionId(s) !== id));
+
+      // Calculate remaining sessions before updating state
+      const remainingSessions = sessions.filter((s) => getSessionId(s) !== id);
+      setSessions(remainingSessions);
+
+      // If the killed session was selected, select the next available or clear
       if (selectedId === id) {
-        onSelect("");
+        if (remainingSessions.length > 0) {
+          onSelect(getSessionId(remainingSessions[0]));
+        } else {
+          onSelect("");
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to kill session");

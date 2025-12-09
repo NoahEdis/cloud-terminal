@@ -25,13 +25,18 @@ const MAX_RECONNECT_DELAY = 30000;
 // Clean malformed escape sequences from terminal output
 // This handles cases where OSC sequences or DA responses get corrupted/truncated
 function cleanTerminalOutput(data: string): string {
-  // Remove orphaned OSC-like sequences without proper ESC prefix
-  // Pattern: ]0; or >0; followed by text until BEL (\x07) or ST (\x1b\\) or end
-  // These appear when the ESC character gets stripped
-  let cleaned = data.replace(/[>\]]0;[^\x07\x1b]*(?:\x07|\x1b\\)?/g, "");
+  let cleaned = data;
 
-  // Remove corrupted DA (Device Attributes) responses like ">0;276c"
-  // Normal DA response is ESC [ ? ... c, but corrupted ones lose the ESC [
+  // Remove orphaned OSC sequences (]10;, ]11;, ]0;, etc.) without proper ESC prefix
+  // These are color query responses that leak through tmux
+  // Pattern: ]N; followed by text until BEL (\x07) or ST (\x1b\\) or backslash or end
+  cleaned = cleaned.replace(/\]1[0-9];[^\x07\x1b\n]*(?:\x07|\x1b\\|\\)?/g, "");
+  cleaned = cleaned.replace(/\][0-9];[^\x07\x1b\n]*(?:\x07|\x1b\\|\\)?/g, "");
+
+  // Remove DA (Device Attributes) responses
+  // Primary DA: ?1;2c or similar
+  // Secondary DA: >0;276;0c or similar
+  cleaned = cleaned.replace(/\?[\d;]+c/g, "");
   cleaned = cleaned.replace(/>[\d;]+c/g, "");
 
   // Remove orphaned CSI sequences without ESC prefix (starting with [ directly)

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cloud-terminal.server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string>/Users/noahedis/new-mcp-structure/cloud-terminal/dist/index.js</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/noahedis/new-mcp-structure/cloud-terminal</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PORT</key>
+        <string>3001</string>
+        <key>HOST</key>
+        <string>0.0.0.0</string>
+        <key>MODE</key>
+        <string>tmux</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- Run at load (boot/login) -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Keep alive - restart if it crashes -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <!-- Throttle restart attempts -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <!-- Log output -->
+    <key>StandardOutPath</key>
+    <string>/Users/noahedis/Library/Logs/cloud-terminal.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/noahedis/Library/Logs/cloud-terminal.error.log</string>
+
+    <!-- Process type for better system integration -->
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

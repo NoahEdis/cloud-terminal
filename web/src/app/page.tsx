@@ -17,12 +17,15 @@ import {
   Loader2,
   Mic,
   Square,
+  WifiOff,
 } from "lucide-react";
 import {
   listSessions,
   sendInput,
   uploadImage,
   getSessionMessageCount,
+  connectionManager,
+  type ConnectionStatus,
 } from "@/lib/api";
 import type { SessionInfo } from "@/lib/types";
 import { getSessionId } from "@/lib/types";
@@ -48,6 +51,7 @@ export default function Home() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionStatus, setSessionStatus] = useState<"running" | "exited">("running");
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("terminal");
   const [command, setCommand] = useState("");
@@ -62,13 +66,39 @@ export default function Home() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
+  // Start connection health checking on mount
+  useEffect(() => {
+    connectionManager.startHealthCheck(5000);
+    const unsubscribe = connectionManager.subscribe(setConnectionStatus);
+    return () => {
+      connectionManager.stopHealthCheck();
+      unsubscribe();
+    };
+  }, []);
+
   useEffect(() => {
     async function loadSessions() {
       try {
         const data = await listSessions();
         setSessions(data);
+
+        // Auto-select first session if none selected
         if (data.length > 0 && !selectedSessionId) {
           setSelectedSessionId(getSessionId(data[0]));
+        }
+
+        // Clear selection if selected session no longer exists
+        if (selectedSessionId && data.length > 0) {
+          const sessionExists = data.some(s => getSessionId(s) === selectedSessionId);
+          if (!sessionExists) {
+            // Selected session was killed, select first available or clear
+            setSelectedSessionId(getSessionId(data[0]));
+          }
+        }
+
+        // Clear selection if all sessions are gone
+        if (data.length === 0 && selectedSessionId) {
+          setSelectedSessionId(null);
         }
       } catch (e) {
         console.error("Failed to load sessions:", e);
@@ -293,6 +323,20 @@ export default function Home() {
                 {sessions.find(s => getSessionId(s) === selectedSessionId)?.name || selectedSessionId.slice(0, 12)}
               </span>
             </>
+          )}
+
+          {/* Connection status indicator */}
+          {connectionStatus === "disconnected" && (
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-red-950/50 border border-red-900/50">
+              <WifiOff className="w-3 h-3 text-red-400" />
+              <span className="text-[11px] text-red-400">Server offline</span>
+            </div>
+          )}
+          {connectionStatus === "connecting" && (
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-amber-950/50 border border-amber-900/50">
+              <Loader2 className="w-3 h-3 text-amber-400 animate-spin" />
+              <span className="text-[11px] text-amber-400">Reconnecting...</span>
+            </div>
           )}
         </div>
 

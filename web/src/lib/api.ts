@@ -1,6 +1,100 @@
 import type { SessionInfo, SessionConfig, HealthStatus } from "./types";
 import type { ClaudeCodeMessage } from "./message-types";
 
+// ============================================================================
+// Connection State Management - Auto-reconnect with status tracking
+// ============================================================================
+
+export type ConnectionStatus = "connected" | "connecting" | "disconnected";
+
+type ConnectionListener = (status: ConnectionStatus) => void;
+
+class ConnectionManager {
+  private status: ConnectionStatus = "disconnected";
+  private listeners: Set<ConnectionListener> = new Set();
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 10;
+  private baseReconnectDelay = 1000;
+  private maxReconnectDelay = 30000;
+
+  getStatus(): ConnectionStatus {
+    return this.status;
+  }
+
+  subscribe(listener: ConnectionListener): () => void {
+    this.listeners.add(listener);
+    // Immediately notify of current status
+    listener(this.status);
+    return () => this.listeners.delete(listener);
+  }
+
+  private setStatus(status: ConnectionStatus) {
+    if (this.status !== status) {
+      this.status = status;
+      this.listeners.forEach((listener) => listener(status));
+    }
+  }
+
+  async checkConnection(): Promise<boolean> {
+    try {
+      const res = await fetch(`${getApiUrl()}/health`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        this.setStatus("connected");
+        this.reconnectAttempts = 0;
+        return true;
+      }
+    } catch {
+      // Connection failed
+    }
+    this.setStatus("disconnected");
+    return false;
+  }
+
+  startHealthCheck(intervalMs = 5000) {
+    if (this.healthCheckInterval) return;
+
+    // Check immediately
+    this.checkConnection();
+
+    this.healthCheckInterval = setInterval(async () => {
+      const wasConnected = this.status === "connected";
+      const isConnected = await this.checkConnection();
+
+      if (!wasConnected && isConnected) {
+        console.log("[ConnectionManager] Server connection restored");
+      } else if (wasConnected && !isConnected) {
+        console.log("[ConnectionManager] Server connection lost, will retry...");
+      }
+    }, intervalMs);
+  }
+
+  stopHealthCheck() {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+  }
+
+  // Get delay for next reconnect attempt (exponential backoff)
+  getReconnectDelay(): number {
+    const delay = Math.min(
+      this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts),
+      this.maxReconnectDelay
+    );
+    this.reconnectAttempts++;
+    return delay;
+  }
+
+  resetReconnectAttempts() {
+    this.reconnectAttempts = 0;
+  }
+}
+
+export const connectionManager = new ConnectionManager();
+
 // Default to environment variables, allow localStorage override
 const getApiUrl = () => {
   let url: string;
