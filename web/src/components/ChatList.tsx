@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
   Terminal,
   Plus,
@@ -102,9 +103,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CredentialsPage } from "@/components/CredentialsPage";
-import { AddCredentialDialog } from "@/components/AddCredentialDialog";
-import { CredentialsGraph } from "@/components/CredentialsGraph";
 
 interface ChatListProps {
   selectedId: string | null;
@@ -184,10 +182,8 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
   // Drag and drop state
   const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
-  // Credentials state
-  const [showCredentials, setShowCredentials] = useState(false);
-  const [showAddCredential, setShowAddCredential] = useState(false);
-  const [showCredentialsGraph, setShowCredentialsGraph] = useState(false);
+  // Router for navigation
+  const router = useRouter();
 
   // Load saved and recent directories, descriptions, doc files, and archived sessions
   useEffect(() => {
@@ -1077,38 +1073,13 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
       {/* Footer with Credentials button */}
       <div className="px-3 py-2 border-t border-zinc-800">
         <button
-          onClick={() => setShowCredentials(true)}
+          onClick={() => router.push("/credentials")}
           className="w-full flex items-center gap-2 px-2 py-1.5 text-[12px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 rounded transition-colors"
         >
           <Key className="w-4 h-4" />
           <span>Credentials</span>
         </button>
       </div>
-
-      {/* Credentials Modal */}
-      <Dialog open={showCredentials} onOpenChange={setShowCredentials}>
-        <DialogContent className="max-w-4xl h-[85vh] p-0 bg-zinc-950 border-zinc-800 overflow-hidden">
-          {showCredentialsGraph ? (
-            <CredentialsGraph onClose={() => setShowCredentialsGraph(false)} />
-          ) : (
-            <CredentialsPage
-              onClose={() => setShowCredentials(false)}
-              onAddClick={() => setShowAddCredential(true)}
-              onGraphClick={() => setShowCredentialsGraph(true)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Credential Dialog */}
-      <AddCredentialDialog
-        open={showAddCredential}
-        onOpenChange={setShowAddCredential}
-        onSuccess={() => {
-          // Refresh credentials page if open
-          setShowAddCredential(false);
-        }}
-      />
 
       {/* New Chat Dialog */}
       <Dialog open={showNewSession} onOpenChange={setShowNewSession}>

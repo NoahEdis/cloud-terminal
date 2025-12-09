@@ -11,7 +11,9 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CREDENTIALS_DIR = join(__dirname, "../../../../config/credentials");
+// Path from cloud-terminal/src/lib/ to new-mcp-structure/config/credentials
+// cloud-terminal/src/lib -> cloud-terminal/src -> cloud-terminal -> new-mcp-structure -> config/credentials
+const CREDENTIALS_DIR = join(__dirname, "../../../config/credentials");
 
 export interface AccountInfo {
   account: string;
