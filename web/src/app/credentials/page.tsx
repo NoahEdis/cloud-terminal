@@ -137,8 +137,9 @@ export default function CredentialsPage() {
 
   const totalCredentials = credentials.length;
   const totalAccounts = groupedCredentials.length;
+  const isGraphView = viewMode === "graph";
 
-  if (viewMode === "graph") {
+  if (isGraphView) {
     return (
       <div className="h-screen bg-zinc-950">
         <CredentialsGraph onClose={() => setViewMode("list")} />
@@ -177,21 +178,13 @@ export default function CredentialsPage() {
             <div className="flex items-center bg-zinc-900 rounded-lg border border-zinc-800 p-0.5">
               <button
                 onClick={() => setViewMode("list")}
-                className={`p-1.5 rounded-md transition-all ${
-                  viewMode === "list"
-                    ? "bg-zinc-800 text-zinc-100 shadow-sm"
-                    : "text-zinc-500 hover:text-zinc-300"
-                }`}
+                className="p-1.5 rounded-md transition-all bg-zinc-800 text-zinc-100 shadow-sm"
               >
                 <List className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setViewMode("graph")}
-                className={`p-1.5 rounded-md transition-all ${
-                  viewMode === "graph"
-                    ? "bg-zinc-800 text-zinc-100 shadow-sm"
-                    : "text-zinc-500 hover:text-zinc-300"
-                }`}
+                className="p-1.5 rounded-md transition-all text-zinc-500 hover:text-zinc-300"
               >
                 <LayoutGrid className="w-4 h-4" />
               </button>
