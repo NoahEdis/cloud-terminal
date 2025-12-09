@@ -12,8 +12,28 @@ import {
   Loader2,
   AlertCircle,
   X,
+  Save,
+  Edit3,
+  Layers,
+  ChevronDown,
+  Plus,
+  Trash2,
+  Target,
+  ArrowRight,
+  ArrowLeft,
+  ArrowLeftRight,
+  Check,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // ============================================================================
 // Types
@@ -31,6 +51,8 @@ export interface GraphNode {
   fy?: number | null;
   vx?: number;
   vy?: number;
+  // Grouping
+  group?: string;
 }
 
 export interface GraphEdge {
@@ -44,6 +66,31 @@ export interface GraphEdge {
 export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
+}
+
+interface GraphMetadata {
+  labels: string[];
+  relationshipTypes: string[];
+  nodeCount: number;
+  edgeCount: number;
+  propertyKeys: string[];
+}
+
+// Grouping strategy types
+type GroupingStrategy = "none" | "label" | "property" | "cluster";
+
+// Context filter for traversal-based filtering
+interface ContextFilter {
+  id: string;
+  name: string;
+  rootNodeId: string;
+  rootNodeLabel: string;
+  direction: "outgoing" | "incoming" | "both";
+  depth: number;
+  excludeLabels: string[];
+  includeLabels: string[];
+  excludeRelationships: string[];
+  includeRelationships: string[];
 }
 
 interface GraphViewProps {
@@ -68,6 +115,8 @@ const LABEL_COLORS: Record<string, string> = {
   Meeting: "#F87171",      // red-400
   Contact: "#38BDF8",      // sky-400
   Document: "#818CF8",     // indigo-400
+  Client: "#F59E0B",       // amber-500
+  System: "#06B6D4",       // cyan-500
   default: "#71717A",      // zinc-500
 };
 
@@ -81,6 +130,27 @@ function getNodeColor(labels: string[]): string {
 }
 
 // ============================================================================
+// LocalStorage helpers for saved filters
+// ============================================================================
+
+const SAVED_FILTERS_KEY = "graph_context_filters";
+
+function getSavedFilters(): ContextFilter[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const stored = localStorage.getItem(SAVED_FILTERS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveFilters(filters: ContextFilter[]) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(filters));
+}
+
+// ============================================================================
 // Component
 // ============================================================================
 
@@ -88,20 +158,63 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Core data state
   const [data, setData] = useState<GraphData | null>(null);
+  const [metadata, setMetadata] = useState<GraphMetadata | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Search and basic filters
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [filterLabels, setFilterLabels] = useState<string[]>([]);
-  const [availableLabels, setAvailableLabels] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
+
+  // Selected node and editing
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [isEditingNode, setIsEditingNode] = useState(false);
+  const [editedProperties, setEditedProperties] = useState<Record<string, string>>({});
+  const [savingNode, setSavingNode] = useState(false);
+
+  // Grouping
+  const [groupingStrategy, setGroupingStrategy] = useState<GroupingStrategy>("none");
+  const [groupingProperty, setGroupingProperty] = useState<string>(""); // For property-based grouping
+
+  // Context filters (advanced traversal-based filtering)
+  const [savedFilters, setSavedFilters] = useState<ContextFilter[]>([]);
+  const [activeFilter, setActiveFilter] = useState<ContextFilter | null>(null);
+  const [showFilterBuilder, setShowFilterBuilder] = useState(false);
+  const [filterBuilderState, setFilterBuilderState] = useState<Partial<ContextFilter>>({
+    direction: "outgoing",
+    depth: 2,
+    excludeLabels: [],
+    includeLabels: [],
+    excludeRelationships: [],
+    includeRelationships: [],
+  });
 
   // D3 references
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphEdge> | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
-  // Fetch graph data
+  // Load saved filters from localStorage
+  useEffect(() => {
+    setSavedFilters(getSavedFilters());
+  }, []);
+
+  // Fetch graph metadata
+  const fetchMetadata = useCallback(async () => {
+    try {
+      const response = await fetch("/api/graph/metadata");
+      if (response.ok) {
+        const meta = await response.json();
+        setMetadata(meta);
+      }
+    } catch (err) {
+      console.error("Failed to fetch metadata:", err);
+    }
+  }, []);
+
+  // Fetch full graph data
   const fetchGraphData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -113,13 +226,7 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
       }
       const graphData: GraphData = await response.json();
       setData(graphData);
-
-      // Extract unique labels
-      const labels = new Set<string>();
-      graphData.nodes.forEach((node) => {
-        node.labels.forEach((label) => labels.add(label));
-      });
-      setAvailableLabels(Array.from(labels).sort());
+      setActiveFilter(null); // Clear any active filter when refreshing
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch graph data");
     } finally {
@@ -127,15 +234,77 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
     }
   }, []);
 
+  // Fetch contextual (traversal-based) graph data
+  const fetchContextualData = useCallback(async (filter: ContextFilter) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const params = new URLSearchParams({
+        nodeId: filter.rootNodeId,
+        direction: filter.direction,
+        depth: filter.depth.toString(),
+      });
+      if (filter.excludeLabels.length > 0) {
+        params.set("excludeLabels", filter.excludeLabels.join(","));
+      }
+      if (filter.includeLabels.length > 0) {
+        params.set("includeLabels", filter.includeLabels.join(","));
+      }
+      if (filter.excludeRelationships.length > 0) {
+        params.set("excludeRelationships", filter.excludeRelationships.join(","));
+      }
+      if (filter.includeRelationships.length > 0) {
+        params.set("includeRelationships", filter.includeRelationships.join(","));
+      }
+
+      const response = await fetch(`/api/graph/traverse?${params}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const result = await response.json();
+      setData({ nodes: result.nodes, edges: result.edges });
+      setActiveFilter(filter);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch contextual data");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchGraphData();
-  }, [fetchGraphData]);
+    fetchMetadata();
+  }, [fetchGraphData, fetchMetadata]);
+
+  // Apply grouping to nodes
+  const applyGrouping = useCallback((nodes: GraphNode[]): GraphNode[] => {
+    if (groupingStrategy === "none") {
+      return nodes.map((n) => ({ ...n, group: undefined }));
+    }
+
+    if (groupingStrategy === "label") {
+      return nodes.map((n) => ({
+        ...n,
+        group: n.labels[0] || "Unknown",
+      }));
+    }
+
+    if (groupingStrategy === "property" && groupingProperty) {
+      return nodes.map((n) => ({
+        ...n,
+        group: String(n.properties[groupingProperty] || "Unknown"),
+      }));
+    }
+
+    return nodes;
+  }, [groupingStrategy, groupingProperty]);
 
   // Filter data based on search and label filters
   const filteredData = useCallback((): GraphData | null => {
     if (!data) return null;
 
-    let nodes = data.nodes;
+    let nodes = applyGrouping(data.nodes);
     let edges = data.edges;
 
     // Filter by labels
@@ -169,7 +338,7 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
     }
 
     return { nodes, edges };
-  }, [data, searchQuery, filterLabels]);
+  }, [data, searchQuery, filterLabels, applyGrouping]);
 
   // Initialize and update D3 visualization
   useEffect(() => {
@@ -215,7 +384,11 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
     const nodes: GraphNode[] = filtered.nodes.map((n) => ({ ...n }));
     const edges: GraphEdge[] = filtered.edges.map((e) => ({ ...e }));
 
-    // Create force simulation
+    // Get unique groups for coloring/clustering
+    const groups = new Set(nodes.map((n) => n.group).filter(Boolean));
+    const groupColors = d3.scaleOrdinal(d3.schemeTableau10).domain(Array.from(groups) as string[]);
+
+    // Create force simulation with grouping forces
     const simulation = d3.forceSimulation<GraphNode>(nodes)
       .force("link", d3.forceLink<GraphNode, GraphEdge>(edges)
         .id((d) => d.id)
@@ -224,6 +397,36 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
       .force("charge", d3.forceManyBody().strength(-300))
       .force("center", d3.forceCenter(width / 2, height / 2))
       .force("collision", d3.forceCollide().radius(30));
+
+    // Add grouping force if grouping is enabled
+    if (groupingStrategy !== "none" && groups.size > 1) {
+      const groupCenters = new Map<string, { x: number; y: number }>();
+      const groupArray = Array.from(groups);
+      const cols = Math.ceil(Math.sqrt(groupArray.length));
+
+      groupArray.forEach((group, i) => {
+        const row = Math.floor(i / cols);
+        const col = i % cols;
+        groupCenters.set(group as string, {
+          x: (col + 0.5) * (width / cols),
+          y: (row + 0.5) * (height / Math.ceil(groupArray.length / cols)),
+        });
+      });
+
+      simulation.force("groupX", d3.forceX<GraphNode>((d) => {
+        if (d.group && groupCenters.has(d.group)) {
+          return groupCenters.get(d.group)!.x;
+        }
+        return width / 2;
+      }).strength(0.1));
+
+      simulation.force("groupY", d3.forceY<GraphNode>((d) => {
+        if (d.group && groupCenters.has(d.group)) {
+          return groupCenters.get(d.group)!.y;
+        }
+        return height / 2;
+      }).strength(0.1));
+    }
 
     simulationRef.current = simulation;
 
@@ -279,10 +482,15 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
           })
       );
 
-    // Node circles
+    // Node circles - use group color if grouping, otherwise label color
     node.append("circle")
       .attr("r", 12)
-      .attr("fill", (d) => getNodeColor(d.labels))
+      .attr("fill", (d) => {
+        if (groupingStrategy !== "none" && d.group) {
+          return groupColors(d.group);
+        }
+        return getNodeColor(d.labels);
+      })
       .attr("stroke", "#18181B")
       .attr("stroke-width", 2);
 
@@ -316,12 +524,15 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
       .on("click", (event, d) => {
         event.stopPropagation();
         setSelectedNode(d);
+        setIsEditingNode(false);
+        setEditedProperties({});
         onNodeSelect?.(d);
       });
 
     // Click on background to deselect
     svg.on("click", () => {
       setSelectedNode(null);
+      setIsEditingNode(false);
       onNodeSelect?.(null);
     });
 
@@ -351,7 +562,7 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
     return () => {
       simulation.stop();
     };
-  }, [filteredData, onNodeSelect]);
+  }, [filteredData, onNodeSelect, groupingStrategy]);
 
   // Zoom controls
   const handleZoomIn = () => {
@@ -395,7 +606,141 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
     );
   };
 
+  // Node editing functions
+  const startEditingNode = () => {
+    if (!selectedNode) return;
+    const props: Record<string, string> = {};
+    Object.entries(selectedNode.properties).forEach(([key, value]) => {
+      props[key] = typeof value === "object" ? JSON.stringify(value) : String(value ?? "");
+    });
+    setEditedProperties(props);
+    setIsEditingNode(true);
+  };
+
+  const saveNodeChanges = async () => {
+    if (!selectedNode) return;
+
+    setSavingNode(true);
+    try {
+      // Parse edited properties back to proper types
+      const newProperties: Record<string, unknown> = {};
+      Object.entries(editedProperties).forEach(([key, value]) => {
+        // Try to parse as JSON first, fall back to string
+        try {
+          newProperties[key] = JSON.parse(value);
+        } catch {
+          newProperties[key] = value;
+        }
+      });
+
+      const response = await fetch("/api/graph", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: selectedNode.id,
+          properties: newProperties,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to save: ${response.statusText}`);
+      }
+
+      const updatedNode = await response.json();
+
+      // Update local data
+      setData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          nodes: prev.nodes.map((n) =>
+            n.id === selectedNode.id ? { ...n, ...updatedNode } : n
+          ),
+        };
+      });
+
+      setSelectedNode({ ...selectedNode, ...updatedNode });
+      setIsEditingNode(false);
+    } catch (err) {
+      console.error("Failed to save node:", err);
+      alert("Failed to save changes");
+    } finally {
+      setSavingNode(false);
+    }
+  };
+
+  const addProperty = () => {
+    const key = prompt("Property name:");
+    if (key && !editedProperties[key]) {
+      setEditedProperties((prev) => ({ ...prev, [key]: "" }));
+    }
+  };
+
+  const removeProperty = (key: string) => {
+    setEditedProperties((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  // Context filter functions
+  const createContextFilterFromNode = (node: GraphNode) => {
+    setFilterBuilderState({
+      rootNodeId: node.id,
+      rootNodeLabel: node.label,
+      direction: "outgoing",
+      depth: 2,
+      excludeLabels: [],
+      includeLabels: [],
+      excludeRelationships: [],
+      includeRelationships: [],
+    });
+    setShowFilterBuilder(true);
+  };
+
+  const saveContextFilter = () => {
+    if (!filterBuilderState.rootNodeId || !filterBuilderState.rootNodeLabel) return;
+
+    const filterName = prompt("Filter name:", filterBuilderState.rootNodeLabel);
+    if (!filterName) return;
+
+    const newFilter: ContextFilter = {
+      id: Date.now().toString(),
+      name: filterName,
+      rootNodeId: filterBuilderState.rootNodeId,
+      rootNodeLabel: filterBuilderState.rootNodeLabel,
+      direction: filterBuilderState.direction || "outgoing",
+      depth: filterBuilderState.depth || 2,
+      excludeLabels: filterBuilderState.excludeLabels || [],
+      includeLabels: filterBuilderState.includeLabels || [],
+      excludeRelationships: filterBuilderState.excludeRelationships || [],
+      includeRelationships: filterBuilderState.includeRelationships || [],
+    };
+
+    const updated = [...savedFilters, newFilter];
+    setSavedFilters(updated);
+    saveFilters(updated);
+    setShowFilterBuilder(false);
+  };
+
+  const applyContextFilter = (filter: ContextFilter) => {
+    fetchContextualData(filter);
+  };
+
+  const deleteContextFilter = (id: string) => {
+    const updated = savedFilters.filter((f) => f.id !== id);
+    setSavedFilters(updated);
+    saveFilters(updated);
+  };
+
+  const clearActiveFilter = () => {
+    setActiveFilter(null);
+    fetchGraphData();
+  };
+
   const filtered = filteredData();
+  const availableLabels = metadata?.labels || [];
 
   return (
     <div className={`h-full flex flex-col bg-zinc-950 ${className}`}>
@@ -424,6 +769,113 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
         >
           <Filter className="w-3.5 h-3.5" />
         </button>
+
+        {/* Grouping dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className={`p-1.5 rounded border transition-colors flex items-center gap-1 ${
+                groupingStrategy !== "none"
+                  ? "border-purple-600 bg-purple-950/50 text-purple-400"
+                  : "border-zinc-800 hover:bg-zinc-800 text-zinc-400"
+              }`}
+              title="Grouping"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <ChevronDown className="w-3 h-3" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-48 bg-zinc-900 border-zinc-800">
+            <DropdownMenuLabel className="text-[11px] text-zinc-500">Grouping Strategy</DropdownMenuLabel>
+            <DropdownMenuSeparator className="bg-zinc-800" />
+            <DropdownMenuItem
+              onClick={() => setGroupingStrategy("none")}
+              className={`text-[12px] ${groupingStrategy === "none" ? "text-purple-400" : ""}`}
+            >
+              {groupingStrategy === "none" && <Check className="w-3 h-3 mr-2" />}
+              No grouping
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => setGroupingStrategy("label")}
+              className={`text-[12px] ${groupingStrategy === "label" ? "text-purple-400" : ""}`}
+            >
+              {groupingStrategy === "label" && <Check className="w-3 h-3 mr-2" />}
+              By label
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="bg-zinc-800" />
+            <DropdownMenuLabel className="text-[11px] text-zinc-500">By Property</DropdownMenuLabel>
+            {(metadata?.propertyKeys || []).slice(0, 10).map((key) => (
+              <DropdownMenuItem
+                key={key}
+                onClick={() => {
+                  setGroupingStrategy("property");
+                  setGroupingProperty(key);
+                }}
+                className={`text-[12px] ${groupingStrategy === "property" && groupingProperty === key ? "text-purple-400" : ""}`}
+              >
+                {groupingStrategy === "property" && groupingProperty === key && (
+                  <Check className="w-3 h-3 mr-2" />
+                )}
+                {key}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Context filters dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className={`p-1.5 rounded border transition-colors flex items-center gap-1 ${
+                activeFilter
+                  ? "border-emerald-600 bg-emerald-950/50 text-emerald-400"
+                  : "border-zinc-800 hover:bg-zinc-800 text-zinc-400"
+              }`}
+              title="Context filters"
+            >
+              <Target className="w-3.5 h-3.5" />
+              <ChevronDown className="w-3 h-3" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56 bg-zinc-900 border-zinc-800">
+            <DropdownMenuLabel className="text-[11px] text-zinc-500">Context Filters</DropdownMenuLabel>
+            <DropdownMenuSeparator className="bg-zinc-800" />
+            {activeFilter && (
+              <>
+                <DropdownMenuItem onClick={clearActiveFilter} className="text-[12px] text-amber-400">
+                  <X className="w-3 h-3 mr-2" />
+                  Clear active: {activeFilter.name}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-zinc-800" />
+              </>
+            )}
+            {savedFilters.length === 0 ? (
+              <div className="px-2 py-3 text-[11px] text-zinc-500 text-center">
+                No saved filters. Select a node and use "Focus on this" to create one.
+              </div>
+            ) : (
+              savedFilters.map((filter) => (
+                <DropdownMenuItem
+                  key={filter.id}
+                  className="text-[12px] flex items-center justify-between group"
+                >
+                  <span onClick={() => applyContextFilter(filter)} className="flex-1 cursor-pointer">
+                    {filter.name}
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteContextFilter(filter.id);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-red-400"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </DropdownMenuItem>
+              ))
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <div className="w-px h-5 bg-zinc-800" />
 
@@ -464,6 +916,11 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
 
         {/* Stats */}
         <div className="ml-auto text-[11px] text-zinc-500">
+          {activeFilter && (
+            <span className="text-emerald-400 mr-2">
+              Filtered: {activeFilter.name}
+            </span>
+          )}
           {filtered && (
             <>
               {filtered.nodes.length} nodes, {filtered.edges.length} edges
@@ -535,11 +992,12 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
                 <Search className="w-5 h-5 text-zinc-600" />
               </div>
               <p className="text-[13px] text-zinc-500">No nodes found</p>
-              {(searchQuery || filterLabels.length > 0) && (
+              {(searchQuery || filterLabels.length > 0 || activeFilter) && (
                 <button
                   onClick={() => {
                     setSearchQuery("");
                     setFilterLabels([]);
+                    if (activeFilter) clearActiveFilter();
                   }}
                   className="mt-2 text-[12px] text-zinc-500 hover:text-zinc-300 underline"
                 >
@@ -559,30 +1017,74 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
 
       {/* Selected node panel */}
       {selectedNode && (
-        <div className="absolute bottom-4 right-4 w-72 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden z-20">
+        <div className="absolute bottom-4 right-4 w-80 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden z-20">
           <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
               <div
-                className="w-3 h-3 rounded-full"
+                className="w-3 h-3 rounded-full flex-shrink-0"
                 style={{ backgroundColor: getNodeColor(selectedNode.labels) }}
               />
               <span className="text-[12px] font-medium text-zinc-200 truncate">
                 {selectedNode.label || selectedNode.id}
               </span>
             </div>
-            <button
-              onClick={() => {
-                setSelectedNode(null);
-                onNodeSelect?.(null);
-              }}
-              className="p-1 rounded hover:bg-zinc-800 text-zinc-500"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+            <div className="flex items-center gap-1">
+              {!isEditingNode ? (
+                <>
+                  <button
+                    onClick={() => createContextFilterFromNode(selectedNode)}
+                    className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-emerald-400"
+                    title="Focus on this node"
+                  >
+                    <Target className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={startEditingNode}
+                    className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-blue-400"
+                    title="Edit properties"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={saveNodeChanges}
+                    disabled={savingNode}
+                    className="p-1 rounded hover:bg-zinc-800 text-emerald-500 hover:text-emerald-400 disabled:opacity-50"
+                    title="Save changes"
+                  >
+                    {savingNode ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Save className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setIsEditingNode(false)}
+                    className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+                    title="Cancel"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => {
+                  setSelectedNode(null);
+                  setIsEditingNode(false);
+                  onNodeSelect?.(null);
+                }}
+                className="p-1 rounded hover:bg-zinc-800 text-zinc-500"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
-          <div className="p-3 max-h-48 overflow-auto">
-            <div className="mb-2">
+          <div className="p-3 max-h-64 overflow-auto">
+            {/* Labels */}
+            <div className="mb-3">
               <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
                 Labels
               </div>
@@ -598,25 +1100,227 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
               </div>
             </div>
 
-            {Object.keys(selectedNode.properties).length > 0 && (
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+            {/* Properties */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500">
                   Properties
                 </div>
-                <div className="space-y-1">
-                  {Object.entries(selectedNode.properties).slice(0, 10).map(([key, value]) => (
-                    <div key={key} className="text-[11px]">
-                      <span className="text-zinc-500">{key}:</span>{" "}
-                      <span className="text-zinc-300">
-                        {typeof value === "object"
-                          ? JSON.stringify(value).slice(0, 50)
-                          : String(value).slice(0, 50)}
-                      </span>
+                {isEditingNode && (
+                  <button
+                    onClick={addProperty}
+                    className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Add
+                  </button>
+                )}
+              </div>
+
+              {isEditingNode ? (
+                <div className="space-y-2">
+                  {Object.entries(editedProperties).map(([key, value]) => (
+                    <div key={key} className="flex items-start gap-1">
+                      <div className="flex-1">
+                        <div className="text-[10px] text-zinc-500 mb-0.5 flex items-center justify-between">
+                          <span>{key}</span>
+                          <button
+                            onClick={() => removeProperty(key)}
+                            className="text-red-400 hover:text-red-300"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                        <Input
+                          value={value}
+                          onChange={(e) =>
+                            setEditedProperties((prev) => ({
+                              ...prev,
+                              [key]: e.target.value,
+                            }))
+                          }
+                          className="h-6 text-[11px] bg-zinc-800 border-zinc-700 text-zinc-200"
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
+              ) : (
+                <div className="space-y-1">
+                  {Object.keys(selectedNode.properties).length === 0 ? (
+                    <p className="text-[11px] text-zinc-600 italic">No properties</p>
+                  ) : (
+                    Object.entries(selectedNode.properties).map(([key, value]) => (
+                      <div key={key} className="text-[11px]">
+                        <span className="text-zinc-500">{key}:</span>{" "}
+                        <span className="text-zinc-300">
+                          {typeof value === "object"
+                            ? JSON.stringify(value).slice(0, 100)
+                            : String(value).slice(0, 100)}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Context Filter Builder Modal */}
+      {showFilterBuilder && (
+        <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-30">
+          <div className="w-96 bg-zinc-900 border border-zinc-800 rounded-lg shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+              <span className="text-[13px] font-medium text-zinc-200">
+                Create Context Filter
+              </span>
+              <button
+                onClick={() => setShowFilterBuilder(false)}
+                className="p-1 rounded hover:bg-zinc-800 text-zinc-500"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {/* Root node */}
+              <div>
+                <div className="text-[11px] text-zinc-500 mb-1">Starting from</div>
+                <div className="px-3 py-2 bg-zinc-800 rounded text-[12px] text-zinc-200">
+                  {filterBuilderState.rootNodeLabel}
+                </div>
               </div>
-            )}
+
+              {/* Direction */}
+              <div>
+                <div className="text-[11px] text-zinc-500 mb-2">Traverse direction</div>
+                <div className="flex gap-2">
+                  {[
+                    { value: "outgoing", icon: ArrowRight, label: "Outgoing" },
+                    { value: "incoming", icon: ArrowLeft, label: "Incoming" },
+                    { value: "both", icon: ArrowLeftRight, label: "Both" },
+                  ].map(({ value, icon: Icon, label }) => (
+                    <button
+                      key={value}
+                      onClick={() =>
+                        setFilterBuilderState((prev) => ({
+                          ...prev,
+                          direction: value as "outgoing" | "incoming" | "both",
+                        }))
+                      }
+                      className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-[11px] transition-colors ${
+                        filterBuilderState.direction === value
+                          ? "bg-emerald-600 text-white"
+                          : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Depth */}
+              <div>
+                <div className="text-[11px] text-zinc-500 mb-2">Depth (hops)</div>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5].map((d) => (
+                    <button
+                      key={d}
+                      onClick={() =>
+                        setFilterBuilderState((prev) => ({ ...prev, depth: d }))
+                      }
+                      className={`flex-1 px-2 py-1.5 rounded text-[11px] transition-colors ${
+                        filterBuilderState.depth === d
+                          ? "bg-emerald-600 text-white"
+                          : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Exclude labels */}
+              <div>
+                <div className="text-[11px] text-zinc-500 mb-2">Exclude labels (optional)</div>
+                <div className="flex gap-1 flex-wrap">
+                  {availableLabels.map((label) => (
+                    <button
+                      key={label}
+                      onClick={() => {
+                        setFilterBuilderState((prev) => ({
+                          ...prev,
+                          excludeLabels: prev.excludeLabels?.includes(label)
+                            ? prev.excludeLabels.filter((l) => l !== label)
+                            : [...(prev.excludeLabels || []), label],
+                        }));
+                      }}
+                      className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                        filterBuilderState.excludeLabels?.includes(label)
+                          ? "bg-red-600 text-white"
+                          : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Exclude relationships */}
+              {metadata?.relationshipTypes && metadata.relationshipTypes.length > 0 && (
+                <div>
+                  <div className="text-[11px] text-zinc-500 mb-2">
+                    Exclude relationships (optional)
+                  </div>
+                  <div className="flex gap-1 flex-wrap max-h-24 overflow-auto">
+                    {metadata.relationshipTypes.map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => {
+                          setFilterBuilderState((prev) => ({
+                            ...prev,
+                            excludeRelationships: prev.excludeRelationships?.includes(type)
+                              ? prev.excludeRelationships.filter((t) => t !== type)
+                              : [...(prev.excludeRelationships || []), type],
+                          }));
+                        }}
+                        className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                          filterBuilderState.excludeRelationships?.includes(type)
+                            ? "bg-red-600 text-white"
+                            : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-zinc-800">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowFilterBuilder(false)}
+                className="text-zinc-400 hover:text-zinc-200"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={saveContextFilter}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white"
+              >
+                Save Filter
+              </Button>
+            </div>
           </div>
         </div>
       )}
