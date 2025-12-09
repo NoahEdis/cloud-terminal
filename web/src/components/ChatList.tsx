@@ -27,6 +27,7 @@ import {
   Bot,
   Key,
   MonitorSmartphone,
+  Cloud,
 } from "lucide-react";
 import {
   listSessions,
@@ -703,15 +704,19 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
                 <span className="truncate text-[12px] font-medium text-zinc-200">
                   {getDisplayName(session)}
                 </span>
-                {session.source === "local" && session.attached && (
+                {session.source === "local" && (
                   <Tooltip delayDuration={800}>
                     <TooltipTrigger asChild>
                       <span className="flex-shrink-0">
-                        <MonitorSmartphone className="w-3 h-3 text-zinc-500" />
+                        {session.attached ? (
+                          <MonitorSmartphone className="w-3 h-3 text-zinc-500" />
+                        ) : (
+                          <Cloud className="w-3 h-3 text-zinc-600" />
+                        )}
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="bg-zinc-800 text-zinc-200 text-[11px] border-zinc-700">
-                      Attached locally via tmux
+                      {session.attached ? "Attached locally via tmux" : "Running in background (detached)"}
                     </TooltipContent>
                   </Tooltip>
                 )}

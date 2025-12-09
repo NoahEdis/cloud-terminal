@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Key,
   ChevronDown,
   ChevronRight,
   Plus,
@@ -16,10 +15,8 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
   TooltipContent,
@@ -141,180 +138,152 @@ export default function CredentialsPage() {
 
   if (isGraphView) {
     return (
-      <div className="h-screen bg-zinc-950">
+      <div className="h-screen bg-black">
         <CredentialsGraph onClose={() => setViewMode("list")} />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-screen bg-zinc-950 text-zinc-100 font-sans overflow-hidden">
+    <div className="h-screen flex flex-col bg-black text-zinc-100">
       {/* Header */}
-      <div className="flex-shrink-0 px-6 py-4 border-b border-zinc-800/80 bg-gradient-to-b from-zinc-900/50 to-transparent">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {/* Back button */}
-            <button
-              onClick={() => router.push("/")}
-              className="p-2 -ml-2 rounded-lg hover:bg-zinc-800 transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5 text-zinc-400" />
-            </button>
-            <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-              <Key className="w-5 h-5 text-emerald-400" />
-            </div>
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight text-zinc-100">
-                Credentials
-              </h1>
-              <p className="text-xs text-zinc-500 font-mono">
-                {totalCredentials} tracked across {totalAccounts} account
-                {totalAccounts !== 1 ? "s" : ""}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* View toggle */}
-            <div className="flex items-center bg-zinc-900 rounded-lg border border-zinc-800 p-0.5">
-              <button
-                onClick={() => setViewMode("list")}
-                className="p-1.5 rounded-md transition-all bg-zinc-800 text-zinc-100 shadow-sm"
-              >
-                <List className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode("graph")}
-                className="p-1.5 rounded-md transition-all text-zinc-500 hover:text-zinc-300"
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
+      <header className="flex items-center justify-between h-11 px-3 border-b border-zinc-800">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push("/")}
+            className="p-1.5 -ml-1.5 rounded hover:bg-zinc-800 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4 text-zinc-400" />
+          </button>
+          <span className="text-[13px] font-medium text-zinc-100">Credentials</span>
+          <span className="text-zinc-600">/</span>
+          <span className="text-[12px] text-zinc-500">
+            {totalCredentials} across {totalAccounts} account{totalAccounts !== 1 ? "s" : ""}
+          </span>
         </div>
 
-        {/* Search and actions */}
-        <div className="flex items-center gap-3 mt-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-            <Input
-              placeholder="Search credentials..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 bg-zinc-900/50 border-zinc-800 text-sm placeholder:text-zinc-600 focus:border-emerald-500/50 focus:ring-emerald-500/20"
-            />
-          </div>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={loadCredentials}
-                  disabled={loading}
-                  className="text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
-                >
-                  <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Refresh</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          <Button
-            onClick={() => router.push("/credentials/add")}
-            size="sm"
-            className="bg-emerald-600 hover:bg-emerald-500 text-white gap-1.5"
+        {/* View switcher */}
+        <div className="flex items-center h-7 rounded-md border border-zinc-800 overflow-hidden">
+          <button
+            onClick={() => setViewMode("list")}
+            className="flex items-center gap-1.5 px-2.5 h-full text-[12px] transition-colors bg-zinc-800 text-zinc-100"
           >
-            <Plus className="w-4 h-4" />
-            Add
-          </Button>
+            <List className="w-3 h-3" />
+            <span className="hidden sm:inline">List</span>
+          </button>
+          <button
+            onClick={() => setViewMode("graph")}
+            className="flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors text-zinc-500 hover:text-zinc-300"
+          >
+            <LayoutGrid className="w-3 h-3" />
+            <span className="hidden sm:inline">Graph</span>
+          </button>
         </div>
+      </header>
+
+      {/* Toolbar */}
+      <div className="px-3 py-2 border-b border-zinc-800 flex items-center gap-2">
+        <div className="relative flex-1 max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" />
+          <Input
+            placeholder="Search..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-8 pl-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
+          />
+        </div>
+        <button
+          onClick={loadCredentials}
+          disabled={loading}
+          className="p-1.5 rounded hover:bg-zinc-800 transition-colors disabled:opacity-50"
+          title="Refresh"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 text-zinc-400 ${loading ? "animate-spin" : ""}`} />
+        </button>
+        <button
+          onClick={() => router.push("/credentials/add")}
+          className="flex items-center gap-1.5 h-8 px-3 text-[12px] rounded border border-zinc-800 hover:bg-zinc-800 transition-colors text-zinc-300"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add
+        </button>
       </div>
 
       {/* Content */}
       <ScrollArea className="flex-1">
-        <div className="p-4">
+        <div className="p-3">
           {loading && credentials.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-zinc-500">
-              <Loader2 className="w-8 h-8 animate-spin mb-4 text-emerald-500/50" />
-              <p className="text-sm">Loading credentials...</p>
+              <Loader2 className="w-5 h-5 animate-spin mb-3 text-zinc-600" />
+              <p className="text-[12px]">Loading credentials...</p>
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center py-16">
-              <div className="p-3 rounded-full bg-red-500/10 mb-4">
-                <X className="w-6 h-6 text-red-400" />
+              <div className="p-2 rounded-full bg-red-500/10 mb-3">
+                <X className="w-4 h-4 text-red-400" />
               </div>
-              <p className="text-sm text-red-400 mb-4">{error}</p>
-              <Button
-                variant="outline"
-                size="sm"
+              <p className="text-[12px] text-red-400 mb-3">{error}</p>
+              <button
                 onClick={loadCredentials}
-                className="border-zinc-700 hover:bg-zinc-800"
+                className="text-[12px] text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
               >
-                Try Again
-              </Button>
+                Try again
+              </button>
             </div>
           ) : filteredGroups.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-zinc-500">
-              <div className="p-4 rounded-full bg-zinc-800/50 mb-4">
-                <Key className="w-8 h-8 text-zinc-600" />
-              </div>
               {searchQuery ? (
                 <>
-                  <p className="text-sm mb-1">No credentials match your search</p>
-                  <p className="text-xs text-zinc-600">Try a different query</p>
+                  <p className="text-[12px] mb-1">No credentials match your search</p>
+                  <p className="text-[11px] text-zinc-600">Try a different query</p>
                 </>
               ) : (
                 <>
-                  <p className="text-sm mb-1">No credentials tracked yet</p>
-                  <p className="text-xs text-zinc-600 mb-4">
+                  <p className="text-[12px] mb-1">No credentials tracked yet</p>
+                  <p className="text-[11px] text-zinc-600 mb-3">
                     Add credentials from your 1Password accounts
                   </p>
-                  <Button
+                  <button
                     onClick={() => router.push("/credentials/add")}
-                    size="sm"
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white gap-1.5"
+                    className="text-[11px] text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
                   >
-                    <Plus className="w-4 h-4" />
-                    Add Credentials
-                  </Button>
+                    Add credentials
+                  </button>
                 </>
               )}
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1">
               {filteredGroups.map((group) => (
                 <div
                   key={group.account}
-                  className="rounded-lg border border-zinc-800/80 bg-zinc-900/30 overflow-hidden"
+                  className="rounded border border-zinc-800 bg-zinc-900/30 overflow-hidden"
                 >
                   {/* Account header */}
                   <button
                     onClick={() => toggleAccount(group.account)}
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-zinc-800/30 transition-colors"
+                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-zinc-800/30 transition-colors"
                   >
                     <div className="text-zinc-500">
                       {expandedAccounts.has(group.account) ? (
-                        <ChevronDown className="w-4 h-4" />
+                        <ChevronDown className="w-3.5 h-3.5" />
                       ) : (
-                        <ChevronRight className="w-4 h-4" />
+                        <ChevronRight className="w-3.5 h-3.5" />
                       )}
                     </div>
                     <div className="flex-1 text-left">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm text-zinc-200">
+                        <span className="text-[12px] font-medium text-zinc-200">
                           {group.account}
                         </span>
-                        <span className="text-xs text-zinc-600 font-mono">
-                          ({group.vaultName})
+                        <span className="text-[11px] text-zinc-600">
+                          {group.vaultName}
                         </span>
                       </div>
                     </div>
-                    <Badge
-                      variant="secondary"
-                      className="bg-zinc-800 text-zinc-400 border-zinc-700 text-xs font-mono"
-                    >
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">
                       {group.credentials.length}
-                    </Badge>
+                    </span>
                   </button>
 
                   {/* Credentials list */}
@@ -323,30 +292,27 @@ export default function CredentialsPage() {
                       {group.credentials.map((cred, idx) => (
                         <div
                           key={cred.id}
-                          className={`flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-800/20 transition-colors group ${
+                          className={`flex items-center gap-2 px-3 py-2 hover:bg-zinc-800/20 transition-colors group ${
                             idx !== group.credentials.length - 1
                               ? "border-b border-zinc-800/30"
                               : ""
                           }`}
                         >
-                          <div className="w-4" /> {/* Indent spacer */}
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/60" />
+                          <div className="w-5" /> {/* Indent spacer */}
+                          <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
-                              <span className="font-mono text-sm text-zinc-300 truncate">
+                              <span className="text-[12px] text-zinc-300 truncate">
                                 {cred.credential_name}
                               </span>
                               {cred.service_name && (
-                                <Badge
-                                  variant="outline"
-                                  className="border-zinc-700 text-zinc-500 text-[10px] px-1.5 py-0"
-                                >
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">
                                   {cred.service_name}
-                                </Badge>
+                                </span>
                               )}
                             </div>
                             {cred.notes && (
-                              <p className="text-xs text-zinc-600 truncate mt-0.5">
+                              <p className="text-[11px] text-zinc-600 truncate mt-0.5">
                                 {cred.notes}
                               </p>
                             )}
@@ -354,21 +320,21 @@ export default function CredentialsPage() {
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon-sm"
+                                <button
                                   onClick={() => handleRemove(cred.id, cred.credential_name)}
                                   disabled={removingIds.has(cred.id)}
-                                  className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                                  className="p-1 rounded opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-50"
                                 >
                                   {removingIds.has(cred.id) ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    <Loader2 className="w-3 h-3 animate-spin" />
                                   ) : (
-                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <Trash2 className="w-3 h-3" />
                                   )}
-                                </Button>
+                                </button>
                               </TooltipTrigger>
-                              <TooltipContent>Remove from tracking</TooltipContent>
+                              <TooltipContent className="bg-zinc-800 text-zinc-200 text-[11px] border-zinc-700">
+                                Remove from tracking
+                              </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
                         </div>
@@ -381,13 +347,6 @@ export default function CredentialsPage() {
           )}
         </div>
       </ScrollArea>
-
-      {/* Footer */}
-      <div className="flex-shrink-0 px-4 py-3 border-t border-zinc-800/50 bg-zinc-900/30">
-        <p className="text-[10px] text-zinc-600 text-center font-mono">
-          Credential metadata only - values stored securely in 1Password
-        </p>
-      </div>
     </div>
   );
 }

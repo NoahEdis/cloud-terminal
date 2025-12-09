@@ -7,8 +7,8 @@ import {
   Check,
   Loader2,
   AlertCircle,
-  Key,
   Building2,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -120,16 +120,19 @@ export default function AddCredentialsPage() {
     setError(null);
 
     try {
-      // Build credential inputs
+      // Build credential inputs with itemId and fieldLabel from account details
       const credentials: TrackedCredentialInput[] = Array.from(selectedCredentials).map(
-        (credName) => ({
-          account_name: accountDetails.account,
-          vault_id: accountDetails.vaultId,
-          vault_name: accountDetails.vaultName,
-          credential_name: credName,
-          item_id: "", // Will be populated by backend
-          field_label: "", // Will be populated by backend
-        })
+        (credName) => {
+          const credInfo = accountDetails.credentials.find(c => c.name === credName);
+          return {
+            account_name: accountDetails.account,
+            vault_id: accountDetails.vaultId,
+            vault_name: accountDetails.vaultName,
+            credential_name: credName,
+            item_id: credInfo?.itemId || "",
+            field_label: credInfo?.fieldLabel || "",
+          };
+        }
       );
 
       await addTrackedCredentials(credentials);
@@ -145,37 +148,30 @@ export default function AddCredentialsPage() {
   const selectedCount = selectedCredentials.size;
 
   return (
-    <div className="flex flex-col h-screen bg-zinc-950 text-zinc-100 font-sans overflow-hidden">
+    <div className="h-screen flex flex-col bg-black text-zinc-100">
       {/* Header */}
-      <div className="flex-shrink-0 px-6 py-4 border-b border-zinc-800/80 bg-gradient-to-b from-zinc-900/50 to-transparent">
-        <div className="flex items-center gap-3">
-          {/* Back button */}
+      <header className="flex items-center justify-between h-11 px-3 border-b border-zinc-800">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => router.push("/credentials")}
-            className="p-2 -ml-2 rounded-lg hover:bg-zinc-800 transition-colors"
+            className="p-1.5 -ml-1.5 rounded hover:bg-zinc-800 transition-colors"
           >
-            <ArrowLeft className="w-5 h-5 text-zinc-400" />
+            <ArrowLeft className="w-4 h-4 text-zinc-400" />
           </button>
-          <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-            <Key className="w-5 h-5 text-emerald-400" />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight text-zinc-100">
-              Add Credentials
-            </h1>
-            <p className="text-xs text-zinc-500">
-              Select credentials from 1Password to track
-            </p>
-          </div>
+          <span className="text-[13px] font-medium text-zinc-100">Add Credentials</span>
+          <span className="text-zinc-600">/</span>
+          <span className="text-[12px] text-zinc-500">
+            Select from 1Password
+          </span>
         </div>
-      </div>
+      </header>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-6">
-        <div className="max-w-2xl mx-auto space-y-6">
+      <ScrollArea className="flex-1">
+        <div className="p-3 max-w-xl">
           {/* Account selector */}
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+          <div className="space-y-1.5 mb-4">
+            <label className="text-[11px] text-zinc-500 uppercase tracking-wider">
               Account
             </label>
             <Select
@@ -183,7 +179,7 @@ export default function AddCredentialsPage() {
               onValueChange={setSelectedAccount}
               disabled={loadingAccounts}
             >
-              <SelectTrigger className="bg-zinc-900 border-zinc-800 text-zinc-200 focus:ring-emerald-500/20 focus:border-emerald-500/50">
+              <SelectTrigger className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 focus:ring-zinc-700 focus:border-zinc-700">
                 <SelectValue placeholder={loadingAccounts ? "Loading accounts..." : "Select account"} />
               </SelectTrigger>
               <SelectContent className="bg-zinc-900 border-zinc-800">
@@ -191,12 +187,12 @@ export default function AddCredentialsPage() {
                   <SelectItem
                     key={account.name}
                     value={account.name}
-                    className="text-zinc-200 focus:bg-zinc-800 focus:text-zinc-100"
+                    className="text-[12px] text-zinc-200 focus:bg-zinc-800 focus:text-zinc-100"
                   >
                     <div className="flex items-center gap-2">
-                      <Building2 className="w-4 h-4 text-zinc-500" />
+                      <Building2 className="w-3.5 h-3.5 text-zinc-500" />
                       <span>{account.name}</span>
-                      <span className="text-xs text-zinc-500 font-mono ml-auto">
+                      <span className="text-[11px] text-zinc-600">
                         ({account.credentialCount})
                       </span>
                     </div>
@@ -208,23 +204,23 @@ export default function AddCredentialsPage() {
 
           {/* Credentials list */}
           {selectedAccount && (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+                <label className="text-[11px] text-zinc-500 uppercase tracking-wider">
                   Credentials
                 </label>
                 {accountDetails && untrackedCount > 0 && (
                   <div className="flex items-center gap-2">
                     <button
                       onClick={selectAll}
-                      className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
+                      className="text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
                     >
                       Select all
                     </button>
                     <span className="text-zinc-700">|</span>
                     <button
                       onClick={selectNone}
-                      className="text-xs text-zinc-500 hover:text-zinc-400 transition-colors"
+                      className="text-[11px] text-zinc-500 hover:text-zinc-400 transition-colors"
                     >
                       Clear
                     </button>
@@ -232,71 +228,73 @@ export default function AddCredentialsPage() {
                 )}
               </div>
 
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 overflow-hidden">
+              <div className="rounded border border-zinc-800 bg-zinc-900/30 overflow-hidden">
                 {loadingDetails ? (
                   <div className="flex items-center justify-center py-12 text-zinc-500">
-                    <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                    <span className="text-sm">Loading credentials...</span>
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    <span className="text-[12px]">Loading credentials...</span>
                   </div>
                 ) : accountDetails?.credentials.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-zinc-500">
-                    <AlertCircle className="w-6 h-6 mb-2" />
-                    <span className="text-sm">No credentials found</span>
+                    <AlertCircle className="w-4 h-4 mb-2" />
+                    <span className="text-[12px]">No credentials found</span>
                   </div>
                 ) : (
-                  <ScrollArea className="h-[400px]">
-                    <div className="divide-y divide-zinc-800/50">
-                      {accountDetails?.credentials.map((cred) => {
-                        const isSelected = selectedCredentials.has(cred.name);
-                        const isTracked = cred.tracked;
+                  <div className="max-h-[360px] overflow-y-auto">
+                    {accountDetails?.credentials.map((cred, idx) => {
+                      const isSelected = selectedCredentials.has(cred.name);
+                      const isTracked = cred.tracked;
 
-                        return (
-                          <button
-                            key={cred.name}
-                            onClick={() => toggleCredential(cred.name, isTracked)}
-                            disabled={isTracked}
-                            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+                      return (
+                        <button
+                          key={cred.name}
+                          onClick={() => toggleCredential(cred.name, isTracked)}
+                          disabled={isTracked}
+                          className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${
+                            idx !== (accountDetails?.credentials.length ?? 0) - 1
+                              ? "border-b border-zinc-800/30"
+                              : ""
+                          } ${
+                            isTracked
+                              ? "opacity-50 cursor-not-allowed"
+                              : isSelected
+                              ? "bg-zinc-800/30"
+                              : "hover:bg-zinc-800/20"
+                          }`}
+                        >
+                          <div
+                            className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
                               isTracked
-                                ? "opacity-50 cursor-not-allowed bg-zinc-900/30"
+                                ? "bg-zinc-700 border-zinc-600"
                                 : isSelected
-                                ? "bg-emerald-500/10"
-                                : "hover:bg-zinc-800/30"
+                                ? "bg-zinc-600 border-zinc-500"
+                                : "border-zinc-600"
                             }`}
                           >
-                            <div
-                              className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${
-                                isTracked
-                                  ? "bg-zinc-700 border-zinc-600"
-                                  : isSelected
-                                  ? "bg-emerald-500 border-emerald-500"
-                                  : "border-zinc-600"
-                              }`}
-                            >
-                              {(isSelected || isTracked) && (
-                                <Check className="w-3.5 h-3.5 text-white" />
-                              )}
-                            </div>
-                            <span
-                              className={`font-mono text-sm flex-1 ${
-                                isTracked
-                                  ? "text-zinc-500"
-                                  : isSelected
-                                  ? "text-emerald-300"
-                                  : "text-zinc-300"
-                              }`}
-                            >
-                              {cred.name}
-                            </span>
-                            {isTracked && (
-                              <span className="text-[10px] text-zinc-600 uppercase tracking-wider">
-                                Already tracked
-                              </span>
+                            {(isSelected || isTracked) && (
+                              <Check className="w-3 h-3 text-zinc-200" />
                             )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </ScrollArea>
+                          </div>
+                          <span
+                            className={`text-[12px] flex-1 truncate ${
+                              isTracked
+                                ? "text-zinc-600"
+                                : isSelected
+                                ? "text-zinc-200"
+                                : "text-zinc-400"
+                            }`}
+                          >
+                            {cred.name}
+                          </span>
+                          {isTracked && (
+                            <span className="text-[10px] text-zinc-600">
+                              Already tracked
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             </div>
@@ -304,42 +302,40 @@ export default function AddCredentialsPage() {
 
           {/* Error message */}
           {error && (
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <div className="flex items-center gap-2 mt-4 p-2 rounded border border-red-500/20 bg-red-500/5 text-red-400 text-[12px]">
+              <X className="w-3.5 h-3.5 flex-shrink-0" />
               {error}
             </div>
           )}
         </div>
-      </div>
+      </ScrollArea>
 
       {/* Footer */}
-      <div className="flex-shrink-0 px-6 py-4 border-t border-zinc-800/50 bg-zinc-900/30">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
-          <Button
-            variant="ghost"
-            onClick={() => router.push("/credentials")}
-            className="text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={selectedCount === 0 || submitting}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50"
-          >
-            {submitting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                Adding...
-              </>
-            ) : (
-              <>
-                Add {selectedCount > 0 ? selectedCount : ""} Credential
-                {selectedCount !== 1 ? "s" : ""}
-              </>
-            )}
-          </Button>
-        </div>
+      <div className="px-3 py-2 border-t border-zinc-800 flex items-center justify-between">
+        <Button
+          variant="ghost"
+          onClick={() => router.push("/credentials")}
+          className="h-8 px-3 text-[12px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
+        >
+          Cancel
+        </Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={selectedCount === 0 || submitting}
+          className="h-8 px-3 text-[12px] bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 disabled:opacity-50"
+        >
+          {submitting ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+              Adding...
+            </>
+          ) : (
+            <>
+              Add {selectedCount > 0 ? selectedCount : ""} Credential
+              {selectedCount !== 1 ? "s" : ""}
+            </>
+          )}
+        </Button>
       </div>
     </div>
   );

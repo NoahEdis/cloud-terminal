@@ -12,6 +12,7 @@ import * as supabase from "../supabase.js";
 import {
   listAccounts,
   getAccountInfo,
+  getAccountCredentialRefs,
 } from "../lib/opSecrets.js";
 
 export const credentialsApi = new Hono();
@@ -237,16 +238,19 @@ credentialsApi.get("/1password/accounts/:name", async (c) => {
 
   try {
     const info = await getAccountInfo(name);
+    const credentialRefs = await getAccountCredentialRefs(name);
 
     // Check which credentials are already tracked
     const trackedCredentials =
       await supabase.getTrackedCredentialsByAccount(name);
     const trackedNames = new Set(trackedCredentials.map((c) => c.credential_name));
 
-    // Return credential metadata with tracking status
+    // Return credential metadata with tracking status and refs
     const credentials = info.credentialNames.map((credName) => ({
       name: credName,
       tracked: trackedNames.has(credName),
+      itemId: credentialRefs[credName]?.itemId || "",
+      fieldLabel: credentialRefs[credName]?.fieldLabel || "",
     }));
 
     return c.json({

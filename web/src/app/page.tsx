@@ -57,7 +57,7 @@ export default function Home() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionStatus, setSessionStatus] = useState<"running" | "exited">("running");
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("messages");

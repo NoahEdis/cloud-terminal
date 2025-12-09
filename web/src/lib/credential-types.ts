@@ -60,6 +60,8 @@ export interface AccountSummary {
 export interface AccountCredentialInfo {
   name: string;
   tracked: boolean;
+  itemId: string;
+  fieldLabel: string;
 }
 
 /**
