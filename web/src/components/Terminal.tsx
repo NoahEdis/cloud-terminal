@@ -428,7 +428,15 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
     });
 
     // Handle input - use WebSocket if available, otherwise HTTP
+    // Filter out mouse tracking sequences (SGR 1006 format: ESC[<...M or ESC[<...m)
+    // These cause garbage characters when the app doesn't handle mouse input
     term.onData((data) => {
+      // Check for mouse sequences: ESC[< followed by digits, semicolons, and M/m
+      // SGR 1006 mouse format: \x1b[<Cb;Cx;CyM (press) or \x1b[<Cb;Cx;Cym (release)
+      if (/^\x1b\[<[\d;]+[Mm]$/.test(data)) {
+        return; // Ignore mouse events
+      }
+
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: "input", data }));
       } else if (usingPollingRef.current) {
