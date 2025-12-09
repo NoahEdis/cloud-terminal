@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
+import { X } from "lucide-react";
 import type { BrainNode, BrainNodeType } from "@/lib/brain-types";
 
 interface BrainGraphProps {
   nodes: BrainNode[];
-  onNodeClick?: (node: BrainNode) => void;
   searchQuery?: string;
 }
 
@@ -31,11 +31,12 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
   target: GraphNode;
 }
 
-export function BrainGraph({ nodes, onNodeClick, searchQuery }: BrainGraphProps) {
+export function BrainGraph({ nodes, searchQuery }: BrainGraphProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [hoveredNode, setHoveredNode] = useState<BrainNode | null>(null);
+  const [selectedNode, setSelectedNode] = useState<BrainNode | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
   // Resize observer
@@ -208,7 +209,13 @@ export function BrainGraph({ nodes, onNodeClick, searchQuery }: BrainGraphProps)
     })
     .on("click", (event, d) => {
       event.stopPropagation();
-      onNodeClick?.(d.data);
+      setSelectedNode(d.data);
+      setHoveredNode(null);
+    });
+
+    // Click on background to deselect
+    svg.on("click", () => {
+      setSelectedNode(null);
     });
 
     // Update positions on tick
@@ -228,7 +235,7 @@ export function BrainGraph({ nodes, onNodeClick, searchQuery }: BrainGraphProps)
     return () => {
       simulation.stop();
     };
-  }, [nodes, dimensions, searchQuery, onNodeClick]);
+  }, [nodes, dimensions, searchQuery]);
 
   return (
     <div ref={containerRef} className="relative w-full h-full bg-black">
@@ -254,11 +261,11 @@ export function BrainGraph({ nodes, onNodeClick, searchQuery }: BrainGraphProps)
 
       {/* Instructions */}
       <div className="absolute top-3 right-3 text-[10px] text-zinc-600 bg-zinc-900/50 px-2 py-1 rounded">
-        Drag to pan • Scroll to zoom • Click node to view
+        Drag nodes • Scroll to zoom • Click node for details
       </div>
 
-      {/* Tooltip */}
-      {hoveredNode && (
+      {/* Hover Tooltip */}
+      {hoveredNode && !selectedNode && (
         <div
           className="absolute z-50 max-w-xs p-2 rounded bg-zinc-800 border border-zinc-700 shadow-lg pointer-events-none"
           style={{
@@ -290,18 +297,69 @@ export function BrainGraph({ nodes, onNodeClick, searchQuery }: BrainGraphProps)
               </span>
             )}
           </div>
-          {hoveredNode.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1">
-              {hoveredNode.tags.slice(0, 5).map((tag) => (
-                <span
-                  key={tag}
-                  className="text-[8px] px-1 py-0.5 rounded bg-zinc-700 text-zinc-500"
-                >
-                  {tag}
-                </span>
-              ))}
+        </div>
+      )}
+
+      {/* Selected Node Detail Panel */}
+      {selectedNode && (
+        <div className="absolute top-3 left-3 w-80 max-h-[calc(100%-6rem)] overflow-auto rounded-lg bg-zinc-900 border border-zinc-700 shadow-xl">
+          <div className="sticky top-0 flex items-center justify-between p-3 border-b border-zinc-800 bg-zinc-900">
+            <div className="flex items-center gap-2">
+              <div
+                className="w-3 h-3 rounded-full"
+                style={{ backgroundColor: NODE_TYPE_COLORS[selectedNode.node_type] }}
+              />
+              <span className="text-[11px] text-zinc-400 capitalize">
+                {selectedNode.node_type}
+              </span>
             </div>
-          )}
+            <button
+              onClick={() => setSelectedNode(null)}
+              className="p-1 rounded hover:bg-zinc-800 transition-colors"
+            >
+              <X className="w-4 h-4 text-zinc-500" />
+            </button>
+          </div>
+          <div className="p-3">
+            <h3 className="text-[14px] font-medium text-zinc-100 mb-2">
+              {selectedNode.title}
+            </h3>
+            {selectedNode.summary && (
+              <p className="text-[12px] text-zinc-400 mb-3">
+                {selectedNode.summary}
+              </p>
+            )}
+            <div className="text-[11px] text-zinc-300 whitespace-pre-wrap mb-3 font-mono bg-zinc-800/50 p-2 rounded">
+              {selectedNode.content}
+            </div>
+            {selectedNode.category && (
+              <div className="text-[10px] text-zinc-500 mb-2">
+                Category: <span className="text-zinc-400">{selectedNode.category}</span>
+              </div>
+            )}
+            {selectedNode.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {selectedNode.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+            {selectedNode.source_url && (
+              <a
+                href={selectedNode.source_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 block text-[10px] text-blue-400 hover:underline truncate"
+              >
+                {selectedNode.source_url}
+              </a>
+            )}
+          </div>
         </div>
       )}
     </div>

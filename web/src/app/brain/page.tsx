@@ -233,7 +233,6 @@ export default function BrainPage() {
             <BrainGraph
               nodes={nodes}
               searchQuery={searchQuery}
-              onNodeClick={(node) => router.push(`/brain/${node.id}`)}
             />
           )}
         </div>
