@@ -420,3 +420,188 @@ export async function shutdownSupabase(): Promise<void> {
   await flushAllOutput();
   console.log("[Supabase] Flushed all pending output");
 }
+
+// ============================================================================
+// Tracked Credentials
+// ============================================================================
+
+/**
+ * Tracked credential row type matching the database schema.
+ */
+export interface TrackedCredential {
+  id: string;
+  account_name: string;
+  vault_id: string;
+  vault_name: string;
+  credential_name: string;
+  item_id: string;
+  field_label: string;
+  service_name: string | null;
+  notes: string | null;
+  added_at: string;
+  updated_at: string;
+}
+
+/**
+ * Input type for creating a tracked credential.
+ */
+export interface TrackedCredentialInput {
+  account_name: string;
+  vault_id: string;
+  vault_name: string;
+  credential_name: string;
+  item_id: string;
+  field_label: string;
+  service_name?: string;
+  notes?: string;
+}
+
+/**
+ * Get all tracked credentials.
+ */
+export async function getTrackedCredentials(): Promise<TrackedCredential[]> {
+  if (!isSupabaseEnabled()) return [];
+
+  try {
+    return await supabaseRequest<TrackedCredential[]>("GET", "/tracked_credentials", {
+      searchParams: {
+        order: "account_name.asc,credential_name.asc",
+      },
+    });
+  } catch (error) {
+    console.error("[Supabase] Failed to get tracked credentials:", error);
+    return [];
+  }
+}
+
+/**
+ * Get tracked credentials for a specific account.
+ */
+export async function getTrackedCredentialsByAccount(accountName: string): Promise<TrackedCredential[]> {
+  if (!isSupabaseEnabled()) return [];
+
+  try {
+    return await supabaseRequest<TrackedCredential[]>("GET", "/tracked_credentials", {
+      searchParams: {
+        account_name: `eq.${accountName}`,
+        order: "credential_name.asc",
+      },
+    });
+  } catch (error) {
+    console.error(`[Supabase] Failed to get tracked credentials for ${accountName}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Add a credential to tracking.
+ */
+export async function addTrackedCredential(credential: TrackedCredentialInput): Promise<TrackedCredential | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    const results = await supabaseRequest<TrackedCredential[]>("POST", "/tracked_credentials", {
+      body: {
+        account_name: credential.account_name,
+        vault_id: credential.vault_id,
+        vault_name: credential.vault_name,
+        credential_name: credential.credential_name,
+        item_id: credential.item_id,
+        field_label: credential.field_label,
+        service_name: credential.service_name || null,
+        notes: credential.notes || null,
+      },
+    });
+    console.log(`[Supabase] Added tracked credential: ${credential.account_name}/${credential.credential_name}`);
+    return results[0] || null;
+  } catch (error) {
+    console.error(`[Supabase] Failed to add tracked credential:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Add multiple credentials to tracking at once.
+ */
+export async function addTrackedCredentials(credentials: TrackedCredentialInput[]): Promise<TrackedCredential[]> {
+  if (!isSupabaseEnabled()) return [];
+
+  try {
+    const results = await supabaseRequest<TrackedCredential[]>("POST", "/tracked_credentials", {
+      body: credentials.map(cred => ({
+        account_name: cred.account_name,
+        vault_id: cred.vault_id,
+        vault_name: cred.vault_name,
+        credential_name: cred.credential_name,
+        item_id: cred.item_id,
+        field_label: cred.field_label,
+        service_name: cred.service_name || null,
+        notes: cred.notes || null,
+      })),
+    });
+    console.log(`[Supabase] Added ${credentials.length} tracked credentials`);
+    return results;
+  } catch (error) {
+    console.error(`[Supabase] Failed to add tracked credentials:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Remove a credential from tracking by ID.
+ */
+export async function removeTrackedCredential(id: string): Promise<void> {
+  if (!isSupabaseEnabled()) return;
+
+  try {
+    await supabaseRequest("DELETE", "/tracked_credentials", {
+      searchParams: { id: `eq.${id}` },
+    });
+    console.log(`[Supabase] Removed tracked credential: ${id}`);
+  } catch (error) {
+    console.error(`[Supabase] Failed to remove tracked credential ${id}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Update a tracked credential's metadata.
+ */
+export async function updateTrackedCredential(
+  id: string,
+  updates: { service_name?: string; notes?: string }
+): Promise<TrackedCredential | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    const results = await supabaseRequest<TrackedCredential[]>("PATCH", "/tracked_credentials", {
+      searchParams: { id: `eq.${id}` },
+      body: updates,
+    });
+    return results[0] || null;
+  } catch (error) {
+    console.error(`[Supabase] Failed to update tracked credential ${id}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Check if a credential is already tracked.
+ */
+export async function isCredentialTracked(accountName: string, credentialName: string): Promise<boolean> {
+  if (!isSupabaseEnabled()) return false;
+
+  try {
+    const results = await supabaseRequest<TrackedCredential[]>("GET", "/tracked_credentials", {
+      searchParams: {
+        account_name: `eq.${accountName}`,
+        credential_name: `eq.${credentialName}`,
+        select: "id",
+      },
+    });
+    return results.length > 0;
+  } catch (error) {
+    console.error(`[Supabase] Failed to check if credential is tracked:`, error);
+    return false;
+  }
+}

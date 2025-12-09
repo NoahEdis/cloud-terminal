@@ -26,12 +26,14 @@ import {
 // Dynamically import Terminal to avoid SSR issues
 const Terminal = dynamic(() => import("./Terminal"), { ssr: false });
 
-interface SessionDetailProps {
-  sessionId: string;
+interface ChatDetailProps {
+  chatId: string;
   onBack?: () => void;
 }
 
-export default function SessionDetail({ sessionId, onBack }: SessionDetailProps) {
+export default function ChatDetail({ chatId, onBack }: ChatDetailProps) {
+  // Alias for backward compatibility with existing code
+  const sessionId = chatId;
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

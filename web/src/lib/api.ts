@@ -1,5 +1,36 @@
-import type { SessionInfo, SessionConfig, HealthStatus } from "./types";
+import type { ChatInfo, ChatConfig, HealthStatus } from "./types";
 import type { ClaudeCodeMessage } from "./message-types";
+import type {
+  TrackedCredential,
+  TrackedCredentialInput,
+  AccountSummary,
+  AccountDetails,
+  CredentialsGraphData,
+  CredentialsStats,
+} from "./credential-types";
+
+// ============================================================================
+// localStorage Migration - Migrate old "session" keys to new "chat" keys
+// ============================================================================
+
+export function migrateLocalStorage(): void {
+  if (typeof window === "undefined") return;
+
+  const migrations: [string, string][] = [
+    ["terminal_session_names", "terminal_chat_names"],
+    ["terminal_session_folders", "terminal_chat_folders"],
+    ["terminal_session_descriptions", "terminal_chat_descriptions"],
+    ["terminal_session_history", "terminal_chat_history"],
+  ];
+
+  for (const [oldKey, newKey] of migrations) {
+    const data = localStorage.getItem(oldKey);
+    if (data && !localStorage.getItem(newKey)) {
+      localStorage.setItem(newKey, data);
+      localStorage.removeItem(oldKey);
+    }
+  }
+}
 
 // ============================================================================
 // Connection State Management - Auto-reconnect with status tracking
@@ -144,22 +175,22 @@ export async function getHealth(): Promise<HealthStatus> {
   return res.json();
 }
 
-export async function listSessions(): Promise<SessionInfo[]> {
+export async function listChats(): Promise<ChatInfo[]> {
   const res = await fetch(`${getApiUrl()}/api/sessions`, { headers: headers() });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
-export async function getSession(id: string): Promise<SessionInfo> {
+export async function getChat(id: string): Promise<ChatInfo> {
   const res = await fetch(`${getApiUrl()}/api/sessions/${id}`, { headers: headers() });
   if (!res.ok) {
-    if (res.status === 404) throw new Error("Session not found");
+    if (res.status === 404) throw new Error("Chat not found");
     throw new Error(`HTTP ${res.status}`);
   }
   return res.json();
 }
 
-export async function createSession(config: SessionConfig): Promise<SessionInfo> {
+export async function createChat(config: ChatConfig): Promise<ChatInfo> {
   const res = await fetch(`${getApiUrl()}/api/sessions`, {
     method: "POST",
     headers: headers(),
@@ -172,7 +203,7 @@ export async function createSession(config: SessionConfig): Promise<SessionInfo>
   return res.json();
 }
 
-export async function killSession(id: string): Promise<void> {
+export async function killChat(id: string): Promise<void> {
   const res = await fetch(`${getApiUrl()}/api/sessions/${id}`, {
     method: "DELETE",
     headers: headers(),
@@ -182,14 +213,21 @@ export async function killSession(id: string): Promise<void> {
   }
 }
 
-export async function killAllSessions(): Promise<void> {
-  const sessions = await listSessions();
-  await Promise.all(sessions.map((s) => {
-    const id = s.source === "local" ? s.id : s.name;
+export async function killAllChats(): Promise<void> {
+  const chats = await listChats();
+  await Promise.all(chats.map((c) => {
+    const id = c.source === "local" ? c.id : c.name;
     if (!id) return Promise.resolve(); // Skip if no valid ID
-    return killSession(id);
+    return killChat(id);
   }));
 }
+
+// Legacy aliases for backward compatibility during migration
+export const listSessions = listChats;
+export const getSession = getChat;
+export const createSession = createChat;
+export const killSession = killChat;
+export const killAllSessions = killAllChats;
 
 export async function sendInput(id: string, input: string): Promise<void> {
   const res = await fetch(`${getApiUrl()}/api/sessions/${id}/send`, {
@@ -242,58 +280,68 @@ export async function pollOutput(id: string, offset: number = 0): Promise<PollRe
   return res.json();
 }
 
-// Local storage helpers for session names
-const SESSION_NAMES_KEY = "terminal_session_names";
+// Local storage helpers for chat names
+const CHAT_NAMES_KEY = "terminal_chat_names";
 
-export function getSessionNames(): Record<string, string> {
+export function getChatNames(): Record<string, string> {
   if (typeof window === "undefined") return {};
   try {
-    return JSON.parse(localStorage.getItem(SESSION_NAMES_KEY) || "{}");
+    return JSON.parse(localStorage.getItem(CHAT_NAMES_KEY) || "{}");
   } catch {
     return {};
   }
 }
 
-export function setSessionName(id: string, name: string): void {
-  const names = getSessionNames();
+export function setChatName(id: string, name: string): void {
+  const names = getChatNames();
   names[id] = name;
-  localStorage.setItem(SESSION_NAMES_KEY, JSON.stringify(names));
+  localStorage.setItem(CHAT_NAMES_KEY, JSON.stringify(names));
 }
 
-export function removeSessionName(id: string): void {
-  const names = getSessionNames();
+export function removeChatName(id: string): void {
+  const names = getChatNames();
   delete names[id];
-  localStorage.setItem(SESSION_NAMES_KEY, JSON.stringify(names));
+  localStorage.setItem(CHAT_NAMES_KEY, JSON.stringify(names));
 }
 
-// Local storage helpers for session folders
-const SESSION_FOLDERS_KEY = "terminal_session_folders";
+// Legacy aliases
+export const getSessionNames = getChatNames;
+export const setSessionName = setChatName;
+export const removeSessionName = removeChatName;
+
+// Local storage helpers for chat folders
+const CHAT_FOLDERS_KEY = "terminal_chat_folders";
 const FOLDERS_LIST_KEY = "terminal_folders";
 
-export function getSessionFolders(): Record<string, string> {
+export function getChatFolders(): Record<string, string> {
   if (typeof window === "undefined") return {};
   try {
-    return JSON.parse(localStorage.getItem(SESSION_FOLDERS_KEY) || "{}");
+    return JSON.parse(localStorage.getItem(CHAT_FOLDERS_KEY) || "{}");
   } catch {
     return {};
   }
 }
 
-export function setSessionFolder(id: string, folder: string): void {
-  const folders = getSessionFolders();
+export function setChatFolder(id: string, folder: string): void {
+  const folders = getChatFolders();
   if (folder) {
     folders[id] = folder;
   } else {
     delete folders[id];
   }
-  localStorage.setItem(SESSION_FOLDERS_KEY, JSON.stringify(folders));
+  localStorage.setItem(CHAT_FOLDERS_KEY, JSON.stringify(folders));
 }
 
-export function removeSessionFolder(id: string): void {
-  const folders = getSessionFolders();
+export function removeChatFolder(id: string): void {
+  const folders = getChatFolders();
   delete folders[id];
-  localStorage.setItem(SESSION_FOLDERS_KEY, JSON.stringify(folders));
+  localStorage.setItem(CHAT_FOLDERS_KEY, JSON.stringify(folders));
 }
+
+// Legacy aliases
+export const getSessionFolders = getChatFolders;
+export const setSessionFolder = setChatFolder;
+export const removeSessionFolder = removeChatFolder;
 
 export function getFoldersList(): string[] {
   if (typeof window === "undefined") return [];
@@ -316,38 +364,42 @@ export function removeFolder(name: string): void {
   const folders = getFoldersList().filter(f => f !== name);
   localStorage.setItem(FOLDERS_LIST_KEY, JSON.stringify(folders));
 
-  // Remove folder assignment from all sessions
-  const sessionFolders = getSessionFolders();
-  for (const [id, folder] of Object.entries(sessionFolders)) {
+  // Remove folder assignment from all chats
+  const chatFolders = getChatFolders();
+  for (const [id, folder] of Object.entries(chatFolders)) {
     if (folder === name) {
-      delete sessionFolders[id];
+      delete chatFolders[id];
     }
   }
-  localStorage.setItem(SESSION_FOLDERS_KEY, JSON.stringify(sessionFolders));
+  localStorage.setItem(CHAT_FOLDERS_KEY, JSON.stringify(chatFolders));
 }
 
-// Session and folder descriptions
-const SESSION_DESCRIPTIONS_KEY = "terminal_session_descriptions";
+// Chat and folder descriptions
+const CHAT_DESCRIPTIONS_KEY = "terminal_chat_descriptions";
 const FOLDER_DESCRIPTIONS_KEY = "terminal_folder_descriptions";
 
-export function getSessionDescriptions(): Record<string, string> {
+export function getChatDescriptions(): Record<string, string> {
   if (typeof window === "undefined") return {};
   try {
-    return JSON.parse(localStorage.getItem(SESSION_DESCRIPTIONS_KEY) || "{}");
+    return JSON.parse(localStorage.getItem(CHAT_DESCRIPTIONS_KEY) || "{}");
   } catch {
     return {};
   }
 }
 
-export function setSessionDescription(id: string, description: string): void {
-  const descriptions = getSessionDescriptions();
+export function setChatDescription(id: string, description: string): void {
+  const descriptions = getChatDescriptions();
   if (description.trim()) {
     descriptions[id] = description.trim();
   } else {
     delete descriptions[id];
   }
-  localStorage.setItem(SESSION_DESCRIPTIONS_KEY, JSON.stringify(descriptions));
+  localStorage.setItem(CHAT_DESCRIPTIONS_KEY, JSON.stringify(descriptions));
 }
+
+// Legacy aliases
+export const getSessionDescriptions = getChatDescriptions;
+export const setSessionDescription = setChatDescription;
 
 export function getFolderDescriptions(): Record<string, string> {
   if (typeof window === "undefined") return {};
@@ -578,10 +630,10 @@ async function supabaseRequest<T>(
 }
 
 /**
- * Fetch structured messages for a session.
+ * Fetch structured messages for a chat.
  */
-export async function getSessionMessages(
-  sessionId: string,
+export async function getChatMessages(
+  chatId: string,
   options: {
     limit?: number;
     afterSeq?: number;
@@ -589,7 +641,7 @@ export async function getSessionMessages(
   } = {}
 ): Promise<ClaudeCodeMessage[]> {
   const searchParams: Record<string, string> = {
-    session_id: `eq.${sessionId}`,
+    session_id: `eq.${chatId}`,
     order: "seq.asc",
   };
 
@@ -611,9 +663,9 @@ export async function getSessionMessages(
 }
 
 /**
- * Get message count for a session (efficient count query).
+ * Get message count for a chat (efficient count query).
  */
-export async function getSessionMessageCount(sessionId: string): Promise<number> {
+export async function getChatMessageCount(chatId: string): Promise<number> {
   const supabaseUrl = getSupabaseUrl();
   const supabaseKey = getSupabaseAnonKey();
 
@@ -623,7 +675,7 @@ export async function getSessionMessageCount(sessionId: string): Promise<number>
 
   try {
     const response = await fetch(
-      `${supabaseUrl}/rest/v1/claude_code_messages?session_id=eq.${encodeURIComponent(sessionId)}&select=count`,
+      `${supabaseUrl}/rest/v1/claude_code_messages?session_id=eq.${encodeURIComponent(chatId)}&select=count`,
       {
         method: "HEAD",
         headers: {
@@ -648,6 +700,10 @@ export async function getSessionMessageCount(sessionId: string): Promise<number>
   }
 }
 
+// Legacy alias
+export const getSessionMessageCount = getChatMessageCount;
+export const getSessionMessages = getChatMessages;
+
 /**
  * Answer a pending question from Claude.
  */
@@ -665,16 +721,16 @@ export async function answerQuestion(
 }
 
 /**
- * Get the latest pending question for a session (if any).
+ * Get the latest pending question for a chat (if any).
  */
 export async function getPendingQuestion(
-  sessionId: string
+  chatId: string
 ): Promise<ClaudeCodeMessage | null> {
   const messages = await supabaseRequest<ClaudeCodeMessage[]>(
     "/claude_code_messages",
     {
       searchParams: {
-        session_id: `eq.${sessionId}`,
+        session_id: `eq.${chatId}`,
         message_type: "eq.user_question",
         user_response: "is.null",
         order: "seq.desc",
@@ -689,8 +745,8 @@ export async function getPendingQuestion(
  * Subscribe to new messages via polling (simple approach for demo).
  * Returns a function to stop polling.
  */
-export function subscribeToMessages(
-  sessionId: string,
+export function subscribeToChatMessages(
+  chatId: string,
   onMessage: (messages: ClaudeCodeMessage[]) => void,
   intervalMs: number = 1000
 ): () => void {
@@ -701,7 +757,7 @@ export function subscribeToMessages(
     if (!active) return;
 
     try {
-      const messages = await getSessionMessages(sessionId, {
+      const messages = await getChatMessages(chatId, {
         afterSeq: lastSeq,
       });
 
@@ -725,14 +781,17 @@ export function subscribeToMessages(
   };
 }
 
+// Legacy alias
+export const subscribeToMessages = subscribeToChatMessages;
+
 // ============================================================================
-// Session History/Archive - Stores killed sessions for later viewing
+// Chat History/Archive - Stores killed chats for later viewing
 // ============================================================================
 
-const SESSION_HISTORY_KEY = "terminal_session_history";
-const MAX_ARCHIVED_SESSIONS = 100;
+const CHAT_HISTORY_KEY = "terminal_chat_history";
+const MAX_ARCHIVED_CHATS = 100;
 
-export interface ArchivedSession {
+export interface ArchivedChat {
   id: string;
   name: string;
   command: string;
@@ -743,76 +802,88 @@ export interface ArchivedSession {
   description?: string;
 }
 
-export function getArchivedSessions(): ArchivedSession[] {
+// Legacy alias
+export type ArchivedSession = ArchivedChat;
+
+export function getArchivedChats(): ArchivedChat[] {
   if (typeof window === "undefined") return [];
   try {
-    return JSON.parse(localStorage.getItem(SESSION_HISTORY_KEY) || "[]");
+    return JSON.parse(localStorage.getItem(CHAT_HISTORY_KEY) || "[]");
   } catch {
     return [];
   }
 }
 
-export function archiveSession(session: {
+// Legacy alias
+export const getArchivedSessions = getArchivedChats;
+
+export function archiveChat(chat: {
   id: string;
   name?: string;
   command?: string;
   cwd: string;
   createdAt?: string;
 }): void {
-  const archived = getArchivedSessions();
-  const sessionFolders = getSessionFolders();
-  const sessionDescriptions = getSessionDescriptions();
-  const sessionNames = getSessionNames();
+  const archived = getArchivedChats();
+  const chatFolders = getChatFolders();
+  const chatDescriptions = getChatDescriptions();
+  const chatNames = getChatNames();
 
   // Don't archive if already exists
-  if (archived.some((s) => s.id === session.id)) return;
+  if (archived.some((c) => c.id === chat.id)) return;
 
-  const archivedSession: ArchivedSession = {
-    id: session.id,
-    name: sessionNames[session.id] || session.name || session.id.slice(0, 8),
-    command: session.command || "zsh",
-    cwd: session.cwd,
-    createdAt: session.createdAt || new Date().toISOString(),
+  const archivedChat: ArchivedChat = {
+    id: chat.id,
+    name: chatNames[chat.id] || chat.name || chat.id.slice(0, 8),
+    command: chat.command || "zsh",
+    cwd: chat.cwd,
+    createdAt: chat.createdAt || new Date().toISOString(),
     killedAt: new Date().toISOString(),
-    folder: sessionFolders[session.id],
-    description: sessionDescriptions[session.id],
+    folder: chatFolders[chat.id],
+    description: chatDescriptions[chat.id],
   };
 
   // Add to front and limit size
-  archived.unshift(archivedSession);
-  const trimmed = archived.slice(0, MAX_ARCHIVED_SESSIONS);
+  archived.unshift(archivedChat);
+  const trimmed = archived.slice(0, MAX_ARCHIVED_CHATS);
 
-  localStorage.setItem(SESSION_HISTORY_KEY, JSON.stringify(trimmed));
+  localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(trimmed));
 }
 
-export function removeArchivedSession(id: string): void {
-  const archived = getArchivedSessions().filter((s) => s.id !== id);
-  localStorage.setItem(SESSION_HISTORY_KEY, JSON.stringify(archived));
+export function removeArchivedChat(id: string): void {
+  const archived = getArchivedChats().filter((c) => c.id !== id);
+  localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(archived));
 }
 
-export function clearArchivedSessions(): void {
-  localStorage.setItem(SESSION_HISTORY_KEY, JSON.stringify([]));
+export function clearArchivedChats(): void {
+  localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify([]));
 }
 
-export function searchArchivedSessions(query: string): ArchivedSession[] {
-  const archived = getArchivedSessions();
+export function searchArchivedChats(query: string): ArchivedChat[] {
+  const archived = getArchivedChats();
   if (!query.trim()) return archived;
 
   const lowerQuery = query.toLowerCase();
-  return archived.filter((s) =>
-    s.name.toLowerCase().includes(lowerQuery) ||
-    s.cwd.toLowerCase().includes(lowerQuery) ||
-    s.command.toLowerCase().includes(lowerQuery) ||
-    s.folder?.toLowerCase().includes(lowerQuery) ||
-    s.description?.toLowerCase().includes(lowerQuery)
+  return archived.filter((c) =>
+    c.name.toLowerCase().includes(lowerQuery) ||
+    c.cwd.toLowerCase().includes(lowerQuery) ||
+    c.command.toLowerCase().includes(lowerQuery) ||
+    c.folder?.toLowerCase().includes(lowerQuery) ||
+    c.description?.toLowerCase().includes(lowerQuery)
   );
 }
 
+// Legacy aliases
+export const archiveSession = archiveChat;
+export const removeArchivedSession = removeArchivedChat;
+export const clearArchivedSessions = clearArchivedChats;
+export const searchArchivedSessions = searchArchivedChats;
+
 /**
- * List all unique message sessions from Supabase.
- * Returns session IDs with metadata about message counts and timestamps.
+ * List all unique message chats from Supabase.
+ * Returns chat IDs with metadata about message counts and timestamps.
  */
-export async function listMessageSessions(): Promise<MessageSession[]> {
+export async function listMessageChats(): Promise<MessageSession[]> {
   const supabaseUrl = getSupabaseUrl();
   const supabaseKey = getSupabaseAnonKey();
 
@@ -877,4 +948,180 @@ export async function listMessageSessions(): Promise<MessageSession[]> {
       message_types: Array.from(s.message_types),
     }))
     .sort((a, b) => b.latest_message_at.localeCompare(a.latest_message_at));
+}
+
+// Legacy alias
+export const listMessageSessions = listMessageChats;
+
+// ============================================================================
+// Credentials API - 1Password credential management
+// ============================================================================
+
+/**
+ * Get all tracked credentials from Supabase.
+ */
+export async function getTrackedCredentials(): Promise<TrackedCredential[]> {
+  const res = await fetch(`${getApiUrl()}/api/credentials/tracked`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Get tracked credentials for a specific account.
+ */
+export async function getTrackedCredentialsByAccount(
+  accountName: string
+): Promise<TrackedCredential[]> {
+  const res = await fetch(
+    `${getApiUrl()}/api/credentials/tracked/by-account/${encodeURIComponent(accountName)}`,
+    { headers: headers() }
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Add a credential to tracking.
+ */
+export async function addTrackedCredential(
+  credential: TrackedCredentialInput
+): Promise<TrackedCredential> {
+  const res = await fetch(`${getApiUrl()}/api/credentials/tracked`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(credential),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Add multiple credentials at once.
+ */
+export async function addTrackedCredentials(
+  credentials: TrackedCredentialInput[]
+): Promise<{ added: number; credentials: TrackedCredential[] }> {
+  const res = await fetch(`${getApiUrl()}/api/credentials/tracked/bulk`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ credentials }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Remove a credential from tracking.
+ * Note: This does NOT remove from 1Password, only from the tracked list.
+ */
+export async function removeTrackedCredential(id: string): Promise<void> {
+  const res = await fetch(
+    `${getApiUrl()}/api/credentials/tracked/${encodeURIComponent(id)}`,
+    {
+      method: "DELETE",
+      headers: headers(),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+}
+
+/**
+ * Update metadata for a tracked credential.
+ */
+export async function updateTrackedCredential(
+  id: string,
+  updates: { service_name?: string; notes?: string }
+): Promise<TrackedCredential> {
+  const res = await fetch(
+    `${getApiUrl()}/api/credentials/tracked/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: headers(),
+      body: JSON.stringify(updates),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Check if a specific credential is tracked.
+ */
+export async function isCredentialTracked(
+  accountName: string,
+  credentialName: string
+): Promise<boolean> {
+  const res = await fetch(
+    `${getApiUrl()}/api/credentials/tracked/check?account_name=${encodeURIComponent(
+      accountName
+    )}&credential_name=${encodeURIComponent(credentialName)}`,
+    { headers: headers() }
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return data.tracked;
+}
+
+/**
+ * List all available 1Password accounts.
+ */
+export async function get1PasswordAccounts(): Promise<AccountSummary[]> {
+  const res = await fetch(`${getApiUrl()}/api/credentials/1password/accounts`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Get detailed credential info for a 1Password account.
+ */
+export async function get1PasswordAccountDetails(
+  accountName: string
+): Promise<AccountDetails> {
+  const res = await fetch(
+    `${getApiUrl()}/api/credentials/1password/accounts/${encodeURIComponent(accountName)}`,
+    { headers: headers() }
+  );
+  if (!res.ok) {
+    if (res.status === 404) throw new Error("Account not found");
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Get graph visualization data for tracked credentials.
+ */
+export async function getCredentialsGraph(): Promise<CredentialsGraphData> {
+  const res = await fetch(`${getApiUrl()}/api/credentials/graph`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Get statistics about tracked credentials.
+ */
+export async function getCredentialsStats(): Promise<CredentialsStats> {
+  const res = await fetch(`${getApiUrl()}/api/credentials/stats`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }

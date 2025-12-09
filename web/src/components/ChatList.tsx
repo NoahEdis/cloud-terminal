@@ -23,6 +23,8 @@ import {
   Archive,
   History,
   AlertTriangle,
+  Bot,
+  Key,
 } from "lucide-react";
 import {
   listSessions,
@@ -56,7 +58,7 @@ import {
   clearArchivedSessions,
   type ArchivedSession,
 } from "@/lib/api";
-import type { SessionInfo, SessionConfig, ActivityState, SessionMetrics } from "@/lib/types";
+import type { SessionInfo, SessionConfig, ActivityState, SessionMetrics, ChatType } from "@/lib/types";
 import { getSessionId } from "@/lib/types";
 
 import { Button } from "@/components/ui/button";
@@ -89,8 +91,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CredentialsPage } from "@/components/CredentialsPage";
+import { AddCredentialDialog } from "@/components/AddCredentialDialog";
+import { CredentialsGraph } from "@/components/CredentialsGraph";
 
-interface SessionListProps {
+interface ChatListProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
 }
@@ -118,7 +123,9 @@ function ActivityIndicator({ state }: { state?: ActivityState }) {
   );
 }
 
-export default function SessionList({ selectedId, onSelect }: SessionListProps) {
+export default function ChatList({ selectedId, onSelect }: ChatListProps) {
+  // Note: internal state still uses "session" naming for backward compatibility
+  // but the external interface and UI use "chat" terminology
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -135,11 +142,15 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
     cwd: "/Users/noahedis",
   });
   const [newSessionFolder, setNewSessionFolder] = useState("");
+  // Chat type for new chat dialog
+  const [newChatType, setNewChatType] = useState<ChatType>("claude");
   const [showSettings, setShowSettings] = useState(false);
   const [apiUrl, setApiUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [geminiApiKey, setGeminiApiKey] = useState("");
+  // Claude Code settings
+  const [skipPermissions, setSkipPermissions] = useState(true);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   // Directory picker state
@@ -162,6 +173,10 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
   // Drag and drop state
   const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+  // Credentials state
+  const [showCredentials, setShowCredentials] = useState(false);
+  const [showAddCredential, setShowAddCredential] = useState(false);
+  const [showCredentialsGraph, setShowCredentialsGraph] = useState(false);
 
   // Load saved and recent directories, descriptions, doc files, and archived sessions
   useEffect(() => {
@@ -198,6 +213,9 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
     setApiKey(storedKey ?? getDefaultApiKey());
     setOpenaiApiKey(storedOpenaiKey || "");
     setGeminiApiKey(storedGeminiKey || "");
+    // Load Claude Code settings
+    const storedSkipPermissions = localStorage.getItem("claudeSkipPermissions");
+    setSkipPermissions(storedSkipPermissions !== "false"); // Default to true
     setLocalStorageLoaded(true);
     fetchSessions();
 
@@ -247,7 +265,18 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
 
   const handleCreate = async () => {
     try {
-      const session = await createSession(newSessionConfig);
+      // Build auto-run command based on chat type
+      let autoRunCommand: string | undefined;
+      if (newChatType === "claude") {
+        autoRunCommand = skipPermissions ? "claude --dangerously-skip-permissions" : "claude";
+      }
+
+      // Create session with optional auto-run command
+      const session = await createSession({
+        ...newSessionConfig,
+        autoRunCommand,
+        chatType: newChatType,
+      });
       const sessionId = getSessionId(session);
       setSessions((prev) => [...prev, session]);
       // Handle folder assignment (empty string or "__none__" means no folder)
@@ -264,6 +293,7 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
       setShowNewSession(false);
       setNewSessionConfig({ command: "zsh", cwd: "/Users/noahedis" });
       setNewSessionFolder("");
+      setNewChatType("claude"); // Reset to default
       onSelect(sessionId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create session");
@@ -452,6 +482,8 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
     localStorage.setItem("terminalApiKey", apiKey);
     localStorage.setItem("openaiApiKey", openaiApiKey);
     localStorage.setItem("geminiApiKey", geminiApiKey);
+    // Save Claude Code settings
+    localStorage.setItem("claudeSkipPermissions", skipPermissions.toString());
     setShowSettings(false);
     fetchSessions();
   };
@@ -785,7 +817,7 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
       {/* Header */}
       <div className="px-3 py-3 border-b border-zinc-800">
         <div className="flex items-center justify-between mb-3">
-          <span className="text-[13px] font-medium text-zinc-100">Sessions</span>
+          <span className="text-[13px] font-medium text-zinc-100">Chats</span>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setShowArchived(!showArchived)}
@@ -824,7 +856,7 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search sessions..."
+            placeholder="Search chats..."
             className="h-8 pl-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
           />
           {searchQuery && (
@@ -841,7 +873,7 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
           className="w-full flex items-center justify-center gap-1.5 h-8 text-[12px] rounded border border-zinc-800 hover:bg-zinc-800 transition-colors text-zinc-300"
         >
           <Plus className="w-3.5 h-3.5" />
-          New Session
+          New Chat
         </button>
       </div>
 
@@ -861,9 +893,9 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
         ) : filteredSessions.length === 0 && folders.length === 0 && !searchQuery && !showArchived ? (
           <div className="flex flex-col items-center justify-center h-32 text-center">
             <Terminal className="w-6 h-6 mb-2 text-zinc-600" />
-            <p className="text-[12px] text-zinc-400">No sessions yet</p>
+            <p className="text-[12px] text-zinc-400">No chats yet</p>
             <p className="text-[11px] mt-1 text-zinc-600">
-              Create a new session to get started
+              Create a new chat to get started
             </p>
           </div>
         ) : (
@@ -962,7 +994,7 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
             {searchQuery && filteredSessions.length === 0 && (!showArchived || filteredArchivedSessions.length === 0) && (
               <div className="flex flex-col items-center justify-center h-24 text-center">
                 <Search className="w-5 h-5 mb-2 text-zinc-600" />
-                <p className="text-[12px] text-zinc-400">No sessions found</p>
+                <p className="text-[12px] text-zinc-400">No chats found</p>
                 <p className="text-[11px] mt-1 text-zinc-600">
                   Try a different search term{!showArchived && " or check history"}
                 </p>
@@ -972,27 +1004,151 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
         )}
       </ScrollArea>
 
-      {/* New Session Dialog */}
+      {/* Footer with Credentials button */}
+      <div className="px-3 py-2 border-t border-zinc-800">
+        <button
+          onClick={() => setShowCredentials(true)}
+          className="w-full flex items-center gap-2 px-2 py-1.5 text-[12px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 rounded transition-colors"
+        >
+          <Key className="w-4 h-4" />
+          <span>Credentials</span>
+        </button>
+      </div>
+
+      {/* Credentials Modal */}
+      <Dialog open={showCredentials} onOpenChange={setShowCredentials}>
+        <DialogContent className="max-w-4xl h-[85vh] p-0 bg-zinc-950 border-zinc-800 overflow-hidden">
+          {showCredentialsGraph ? (
+            <CredentialsGraph onClose={() => setShowCredentialsGraph(false)} />
+          ) : (
+            <CredentialsPage
+              onClose={() => setShowCredentials(false)}
+              onAddClick={() => setShowAddCredential(true)}
+              onGraphClick={() => setShowCredentialsGraph(true)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Credential Dialog */}
+      <AddCredentialDialog
+        open={showAddCredential}
+        onOpenChange={setShowAddCredential}
+        onSuccess={() => {
+          // Refresh credentials page if open
+          setShowAddCredential(false);
+        }}
+      />
+
+      {/* New Chat Dialog */}
       <Dialog open={showNewSession} onOpenChange={setShowNewSession}>
         <DialogContent className="bg-zinc-950 border-zinc-800">
           <DialogHeader>
-            <DialogTitle className="text-[14px] font-medium text-zinc-100">New Session</DialogTitle>
+            <DialogTitle className="text-[14px] font-medium text-zinc-100">New Chat</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            {/* Chat Type Selector */}
             <div className="space-y-2">
               <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-                Command
+                Chat Type
               </label>
-              <Input
-                type="text"
-                value={newSessionConfig.command}
-                onChange={(e) =>
-                  setNewSessionConfig((prev) => ({ ...prev, command: e.target.value }))
-                }
-                placeholder="zsh"
-                className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
-              />
+              <div className="grid gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNewChatType("claude")}
+                  className={`flex items-start gap-3 p-3 rounded border transition-colors text-left ${
+                    newChatType === "claude"
+                      ? "border-emerald-600 bg-emerald-950/30"
+                      : "border-zinc-800 hover:border-zinc-700 bg-zinc-900/50"
+                  }`}
+                >
+                  <div className={`p-1.5 rounded ${newChatType === "claude" ? "bg-emerald-600" : "bg-zinc-800"}`}>
+                    <Bot className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12px] font-medium text-zinc-200">Claude Code</span>
+                      {newChatType === "claude" && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-600/20 text-emerald-400 border border-emerald-600/30">
+                          Selected
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                      AI-powered coding assistant with full codebase access
+                    </p>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewChatType("custom")}
+                  className={`flex items-start gap-3 p-3 rounded border transition-colors text-left ${
+                    newChatType === "custom"
+                      ? "border-zinc-600 bg-zinc-900"
+                      : "border-zinc-800 hover:border-zinc-700 bg-zinc-900/50"
+                  }`}
+                >
+                  <div className={`p-1.5 rounded ${newChatType === "custom" ? "bg-zinc-600" : "bg-zinc-800"}`}>
+                    <Terminal className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12px] font-medium text-zinc-200">Custom Terminal</span>
+                      {newChatType === "custom" && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-600/20 text-zinc-400 border border-zinc-600/30">
+                          Selected
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                      Standard terminal session with any shell command
+                    </p>
+                  </div>
+                </button>
+              </div>
             </div>
+
+            {/* Claude Code Settings - only show when Claude type selected */}
+            {newChatType === "claude" && (
+              <div className="flex items-center justify-between p-3 bg-zinc-900/50 rounded border border-zinc-800">
+                <div>
+                  <p className="text-[12px] text-zinc-200">Skip permission prompts</p>
+                  <p className="text-[10px] text-zinc-500">Auto-run with --dangerously-skip-permissions</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSkipPermissions(!skipPermissions)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                    skipPermissions ? "bg-emerald-600" : "bg-zinc-700"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      skipPermissions ? "translate-x-[18px]" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </div>
+            )}
+
+            {/* Command input - only show for custom type */}
+            {newChatType === "custom" && (
+              <div className="space-y-2">
+                <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                  Command
+                </label>
+                <Input
+                  type="text"
+                  value={newSessionConfig.command}
+                  onChange={(e) =>
+                    setNewSessionConfig((prev) => ({ ...prev, command: e.target.value }))
+                  }
+                  placeholder="zsh"
+                  className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
+                />
+              </div>
+            )}
+
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
@@ -1169,6 +1325,32 @@ export default function SessionList({ selectedId, onSelect }: SessionListProps) 
                 placeholder="Leave empty for local dev"
                 className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
               />
+            </div>
+
+            {/* Claude Code Settings */}
+            <div className="border-t border-zinc-800 pt-4 mt-4">
+              <h4 className="text-[12px] font-medium text-zinc-300 mb-3">Claude Code</h4>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-zinc-900/50 rounded border border-zinc-800">
+                  <div>
+                    <p className="text-[12px] text-zinc-200">Skip permission prompts</p>
+                    <p className="text-[10px] text-zinc-500">Auto-run with --dangerously-skip-permissions flag</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSkipPermissions(!skipPermissions)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                      skipPermissions ? "bg-emerald-600" : "bg-zinc-700"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                        skipPermissions ? "translate-x-[18px]" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Danger Zone */}

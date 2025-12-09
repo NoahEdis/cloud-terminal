@@ -25,6 +25,7 @@ import {
   uploadImage,
   getSessionMessageCount,
   connectionManager,
+  migrateLocalStorage,
   type ConnectionStatus,
 } from "@/lib/api";
 import type { SessionInfo } from "@/lib/types";
@@ -39,7 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import SessionList from "@/components/SessionList";
+import ChatList from "@/components/ChatList";
 
 const Terminal = dynamic(() => import("@/components/Terminal"), { ssr: false });
 const MessageView = dynamic(() => import("@/components/MessageView"), { ssr: false });
@@ -53,7 +54,7 @@ export default function Home() {
   const [sessionStatus, setSessionStatus] = useState<"running" | "exited">("running");
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("terminal");
+  const [viewMode, setViewMode] = useState<ViewMode>("messages");
   const [command, setCommand] = useState("");
   const [pendingImages, setPendingImages] = useState<Array<{ dataUrl: string; name: string }>>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -66,8 +67,11 @@ export default function Home() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // Start connection health checking on mount
+  // Migrate localStorage keys and start connection health checking on mount
   useEffect(() => {
+    // Migrate old "session" keys to new "chat" keys
+    migrateLocalStorage();
+
     connectionManager.startHealthCheck(5000);
     const unsubscribe = connectionManager.subscribe(setConnectionStatus);
     return () => {
@@ -300,7 +304,7 @@ export default function Home() {
               <span className="text-zinc-600">/</span>
               <Select value={selectedSessionId || ""} onValueChange={handleSelectSession}>
                 <SelectTrigger className="h-7 w-44 text-[12px] bg-transparent border-zinc-800 text-zinc-400">
-                  <SelectValue placeholder="Select session" />
+                  <SelectValue placeholder="Select chat" />
                 </SelectTrigger>
                 <SelectContent>
                   {sessions.map((session) => (
@@ -386,7 +390,7 @@ export default function Home() {
           }`}
         >
           <div className="w-72 h-full">
-            <SessionList selectedId={selectedSessionId} onSelect={handleSelectSession} />
+            <ChatList selectedId={selectedSessionId} onSelect={handleSelectSession} />
           </div>
         </div>
 
@@ -404,12 +408,12 @@ export default function Home() {
                 <div className="h-full flex items-center justify-center">
                   <div className="text-center">
                     <TerminalIcon className="w-6 h-6 mx-auto mb-2 text-zinc-700" />
-                    <p className="text-[12px] text-zinc-500">No session selected</p>
+                    <p className="text-[12px] text-zinc-500">No chat selected</p>
                     <button
                       onClick={() => setSidebarOpen(true)}
                       className="mt-2 text-[11px] text-zinc-500 hover:text-zinc-300 underline underline-offset-2"
                     >
-                      Open sessions
+                      Open chats
                     </button>
                   </div>
                 </div>
@@ -421,12 +425,12 @@ export default function Home() {
                 <div className="h-full flex items-center justify-center">
                   <div className="text-center">
                     <MessageSquare className="w-6 h-6 mx-auto mb-2 text-zinc-700" />
-                    <p className="text-[12px] text-zinc-500">No session selected</p>
+                    <p className="text-[12px] text-zinc-500">No chat selected</p>
                     <button
                       onClick={() => setSidebarOpen(true)}
                       className="mt-2 text-[11px] text-zinc-500 hover:text-zinc-300 underline underline-offset-2"
                     >
-                      Open sessions
+                      Open chats
                     </button>
                   </div>
                 </div>

@@ -1,6 +1,8 @@
 export type ActivityState = "idle" | "busy" | "exited";
 
-export interface SessionMetrics {
+export type ChatType = "claude" | "custom";
+
+export interface ChatMetrics {
   // Total number of newlines in output (actual lines of content)
   lineCount: number;
   // Total characters in output buffer
@@ -11,11 +13,11 @@ export interface SessionMetrics {
   estimatedTokens: number;
 }
 
-export interface SessionInfo {
+export interface ChatInfo {
   // Tmux mode uses `name` as the identifier, PTY mode uses `id`
   id?: string;
   name?: string;
-  // Command info (optional in tmux mode where sessions are discovered)
+  // Command info (optional in tmux mode where chats are discovered)
   command?: string;
   args?: string[];
   cwd: string;
@@ -35,23 +37,35 @@ export interface SessionInfo {
   // Client-side only (stored in localStorage)
   displayName?: string;
   folder?: string;
-  // Session metrics for context tracking
-  metrics?: SessionMetrics;
+  // Chat metrics for context tracking
+  metrics?: ChatMetrics;
+  // Chat type for determining available features
+  chatType?: ChatType;
 }
 
-// Helper to get session identifier (works with both tmux and PTY modes)
-export function getSessionId(session: SessionInfo): string {
-  return session.name || session.id || "";
+// Helper to get chat identifier (works with both tmux and PTY modes)
+export function getChatId(chat: ChatInfo): string {
+  return chat.name || chat.id || "";
 }
 
-export interface SessionConfig {
+export interface ChatConfig {
   command: string;
   args?: string[];
   cwd?: string;
   env?: Record<string, string>;
   cols?: number;
   rows?: number;
+  // Chat type for auto-run and feature detection
+  chatType?: ChatType;
+  // Command to auto-run after chat creation (e.g., claude --dangerously-skip-permissions)
+  autoRunCommand?: string;
 }
+
+// Legacy aliases for backward compatibility during migration
+export type SessionMetrics = ChatMetrics;
+export type SessionInfo = ChatInfo;
+export type SessionConfig = ChatConfig;
+export const getSessionId = getChatId;
 
 export interface HealthStatus {
   status: string;

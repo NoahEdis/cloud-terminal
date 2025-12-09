@@ -120,6 +120,48 @@ function updateMetrics(metrics: SessionMetrics, newData: string, fullBuffer: str
   }
 }
 
+/**
+ * Filter out terminal query responses from input data.
+ * These are responses that xterm.js sends in response to terminal capability queries,
+ * but should not be forwarded to applications like Claude Code.
+ *
+ * Common sequences filtered:
+ * - Primary DA (Device Attributes): ESC[?1;2c or similar (responds to ESC[c)
+ * - Secondary DA: ESC[>0;276;0c or similar (responds to ESC[>c)
+ * - OSC responses: ESC]11;rgb:xxxx/xxxx/xxxx (background color query response)
+ * - Orphaned responses that lost their ESC prefix through buffering
+ */
+function filterTerminalResponses(data: string): string {
+  let filtered = data;
+
+  // Filter full escape sequences (with ESC prefix)
+  // Primary DA response: ESC[?...c
+  filtered = filtered.replace(/\x1b\[\?[\d;]*c/g, "");
+  // Secondary DA response: ESC[>...c
+  filtered = filtered.replace(/\x1b\[>[\d;]*c/g, "");
+  // OSC sequences (color queries, title, etc.): ESC]...BEL or ESC]...ST
+  filtered = filtered.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, "");
+
+  // Filter orphaned responses (ESC got stripped by buffering)
+  // These appear as raw ?1;2c or >0;276;0c or ]11;rgb:...
+  filtered = filtered.replace(/^\?[\d;]+c/g, "");
+  filtered = filtered.replace(/^>[\d;]+c/g, "");
+  filtered = filtered.replace(/^\]1?[0-9];[^\x07\n]*/g, "");
+
+  // Also filter these patterns if they appear mid-string (after newlines, etc.)
+  filtered = filtered.replace(/\n\?[\d;]+c/g, "\n");
+  filtered = filtered.replace(/\n>[\d;]+c/g, "\n");
+  filtered = filtered.replace(/\n\]1?[0-9];[^\x07\n]*/g, "\n");
+
+  // Filter mid-string orphaned responses (surrounded by any character)
+  // Use a more aggressive pattern for standalone DA responses
+  filtered = filtered.replace(/(?<![a-zA-Z0-9])\?[\d;]+c(?![a-zA-Z0-9])/g, "");
+  filtered = filtered.replace(/(?<![a-zA-Z0-9])>[\d;]+c(?![a-zA-Z0-9])/g, "");
+
+  // Clean up any resulting empty data
+  return filtered.trim() || filtered;
+}
+
 export class TmuxSessionManager {
   private sessions = new Map<string, TmuxManagedSession>();
   // Track session_id -> name mapping to detect renames
@@ -276,6 +318,8 @@ export class TmuxSessionManager {
     cwd?: string;
     cols?: number;
     rows?: number;
+    autoRunCommand?: string;
+    chatType?: "claude" | "custom";
   }): Promise<TmuxManagedSession> {
     const name = config.name || `${CLOUD_SESSION_PREFIX}${Date.now()}`;
     const cwd = config.cwd || process.env.HOME || "/";
@@ -328,7 +372,26 @@ export class TmuxSessionManager {
       lastOutputTime: session.lastActivity,
     });
 
+    // If autoRunCommand is provided, wait for shell prompt then send the command
+    if (config.autoRunCommand) {
+      // Wait a short time for shell to initialize and display prompt
+      await this.waitForPrompt(name, 2000);
+      // Send the command
+      tmux.sendKeys(name, config.autoRunCommand + "\n", true);
+      console.log(`[TmuxSessionManager] Auto-ran command in ${name}: ${config.autoRunCommand}`);
+    }
+
     return session;
+  }
+
+  /**
+   * Wait for shell prompt to appear (simple timeout-based wait).
+   * This gives the shell time to initialize before sending commands.
+   */
+  private async waitForPrompt(name: string, timeoutMs: number): Promise<void> {
+    // Simple approach: just wait a fixed time for shell to be ready
+    // More sophisticated: poll tmux pane content for prompt patterns
+    await new Promise(resolve => setTimeout(resolve, timeoutMs));
   }
 
   /**
@@ -445,11 +508,18 @@ export class TmuxSessionManager {
 
     session.lastActivity = new Date();
 
+    // Filter out terminal query responses that can leak into input
+    // These are responses from xterm.js that should not be sent to applications
+    const filteredData = filterTerminalResponses(data);
+
+    // Skip if nothing left after filtering
+    if (!filteredData) return true;
+
     // Always use tmux send-keys for input - this ensures proper Enter key
     // handling with readline-based apps like Claude Code.
     // The literal=true flag splits on newlines and sends Enter as a key name,
     // which works more reliably than writing \r directly to a PTY.
-    tmux.sendKeys(name, data, true);
+    tmux.sendKeys(name, filteredData, true);
 
     return true;
   }

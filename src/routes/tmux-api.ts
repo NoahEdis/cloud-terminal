@@ -23,6 +23,8 @@ tmuxApi.post("/sessions", async (c) => {
     cwd?: string;
     cols?: number;
     rows?: number;
+    autoRunCommand?: string;
+    chatType?: "claude" | "custom";
   }>();
 
   // Coerce string numbers to actual numbers (n8n sends strings)
@@ -31,6 +33,8 @@ tmuxApi.post("/sessions", async (c) => {
     cwd: body.cwd,
     cols: body.cols ? Number(body.cols) : undefined,
     rows: body.rows ? Number(body.rows) : undefined,
+    autoRunCommand: body.autoRunCommand,
+    chatType: body.chatType,
   };
 
   try {

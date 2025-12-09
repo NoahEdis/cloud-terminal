@@ -14,6 +14,7 @@ import { logger } from "hono/logger";
 import { createServer, IncomingMessage, ServerResponse } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { tmuxApi } from "./routes/tmux-api.js";
+import { credentialsApi } from "./routes/credentials-api.js";
 import { handleTmuxWebSocketConnection } from "./websocket/tmux-handler.js";
 import { tmuxSessionManager } from "./tmux-session-manager.js";
 import { authMiddleware } from "./middleware/auth.js";
@@ -80,6 +81,7 @@ export function createTmuxTerminalServer(config: ServerConfig = {}) {
 
   // API routes
   app.route("/api", tmuxApi);
+  app.route("/api/credentials", credentialsApi);
 
   // Create HTTP server
   const httpServer = createServer();
