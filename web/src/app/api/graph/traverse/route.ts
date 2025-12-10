@@ -222,7 +222,11 @@ export async function GET(request: NextRequest) {
           if (!visitedNodes.has(neighborId)) {
             visitedNodes.add(neighborId);
             resultNodes.push(neighborNode);
-            nextFrontier.push(neighborId);
+            // Don't traverse through boundary nodes - include them but stop there
+            const isBoundary = neighborNode.labels.includes("TraversalBoundary");
+            if (!isBoundary) {
+              nextFrontier.push(neighborId);
+            }
           }
         }
       }
