@@ -1,19 +1,34 @@
 import { auth } from "@/auth";
 
+// Public routes that don't require authentication
+const PUBLIC_ROUTES = [
+  "/api/auth",
+  "/api/diagrams",
+  "/api/graph",
+  "/api/brain",
+  "/brain",
+  "/integrations",
+  "/demo",
+  "/",
+];
+
 export default auth((req) => {
   const isLoggedIn = !!req.auth;
   const pathname = req.nextUrl.pathname;
-  const isAuthRoute = pathname.startsWith("/api/auth");
-  const isApiRoute = pathname.startsWith("/api/");
-  const isDiagramsRoute = pathname.startsWith("/api/diagrams");
 
-  // Always allow auth routes and diagrams (public)
-  if (isAuthRoute || isDiagramsRoute) {
+  // Check if route is public
+  const isPublicRoute = PUBLIC_ROUTES.some(route =>
+    pathname === route || pathname.startsWith(route + "/")
+  );
+
+  // Always allow public routes
+  if (isPublicRoute) {
     return;
   }
 
-  // For non-authenticated requests
+  // For non-authenticated requests to protected routes
   if (!isLoggedIn) {
+    const isApiRoute = pathname.startsWith("/api/");
     // Return 401 for API routes (don't redirect)
     if (isApiRoute) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {

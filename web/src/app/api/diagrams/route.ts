@@ -53,6 +53,11 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
+      // If table doesn't exist (404), return empty array instead of error
+      if (response.status === 404) {
+        console.warn("figma_diagrams table not found, returning empty array");
+        return NextResponse.json({ diagrams: [] });
+      }
       const error = await response.text();
       console.error("Failed to fetch diagrams:", error);
       return NextResponse.json(
