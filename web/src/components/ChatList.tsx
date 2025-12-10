@@ -619,11 +619,11 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
 
     return (
       <>
-        <MenuItem onClick={() => handleRename(sessionId, sessionNames[sessionId] || "")} className="text-[12px]">
+        <MenuItem onSelect={() => handleRename(sessionId, sessionNames[sessionId] || "")} className="text-[12px]">
           <Pencil className="w-3 h-3 mr-2" />
           Rename
         </MenuItem>
-        <MenuItem onClick={() => handleEditDescription("session", sessionId)} className="text-[12px]">
+        <MenuItem onSelect={() => handleEditDescription("session", sessionId)} className="text-[12px]">
           <Pencil className="w-3 h-3 mr-2" />
           {sessionDescriptions[sessionId] ? "Edit Description" : "Add Description"}
         </MenuItem>
@@ -632,7 +632,7 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
             <MenuSeparator className="bg-zinc-800" />
             <MenuLabel className="text-[11px] text-zinc-500">Move to folder</MenuLabel>
             <MenuItem
-              onClick={() => handleMoveToFolder(sessionId, "")}
+              onSelect={() => handleMoveToFolder(sessionId, "")}
               className={`text-[12px] ${!sessionFolders[sessionId] ? "text-zinc-100" : ""}`}
             >
               (No folder)
@@ -640,7 +640,7 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
             {folders.map((folder) => (
               <MenuItem
                 key={folder}
-                onClick={() => handleMoveToFolder(sessionId, folder)}
+                onSelect={() => handleMoveToFolder(sessionId, folder)}
                 className={`text-[12px] ${sessionFolders[sessionId] === folder ? "text-zinc-100" : ""}`}
               >
                 {folder}
@@ -650,7 +650,7 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
         )}
         <MenuSeparator className="bg-zinc-800" />
         <MenuItem
-          onClick={() => handleKill(sessionId)}
+          onSelect={() => handleKill(sessionId)}
           className="text-[12px] text-red-400 focus:text-red-400"
         >
           <Trash2 className="w-3 h-3 mr-2" />

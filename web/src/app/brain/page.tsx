@@ -45,7 +45,7 @@ import {
 } from "@/lib/api";
 import type { BrainNode, BrainNodeType } from "@/lib/brain-types";
 import { NODE_TYPE_META } from "@/lib/brain-types";
-import { BrainGraph } from "@/components/brain-graph";
+import GraphView from "@/components/GraphView";
 
 // Node type icons
 const NODE_TYPE_ICONS: Record<BrainNodeType, typeof Brain> = {
@@ -200,41 +200,7 @@ export default function BrainPage() {
         </header>
         {/* Full height graph container */}
         <div className="flex-1 relative">
-          {loading && nodes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-zinc-500">
-              <Loader2 className="w-5 h-5 animate-spin mb-3 text-zinc-600" />
-              <p className="text-[12px]">Loading brain nodes...</p>
-            </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center h-full">
-              <div className="p-2 rounded-full bg-red-500/10 mb-3">
-                <X className="w-4 h-4 text-red-400" />
-              </div>
-              <p className="text-[12px] text-red-400 mb-3">{error}</p>
-              <button
-                onClick={loadNodes}
-                className="text-[12px] text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
-              >
-                Try again
-              </button>
-            </div>
-          ) : nodes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-zinc-500">
-              <Brain className="w-6 h-6 mb-3 text-zinc-600" />
-              <p className="text-[12px] mb-1">No brain nodes yet</p>
-              <button
-                onClick={() => router.push("/brain/add")}
-                className="text-[11px] text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
-              >
-                Add brain node
-              </button>
-            </div>
-          ) : (
-            <BrainGraph
-              nodes={nodes}
-              searchQuery={searchQuery}
-            />
-          )}
+          <GraphView />
         </div>
       </div>
     );
