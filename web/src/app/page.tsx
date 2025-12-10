@@ -19,6 +19,7 @@ import {
   Mic,
   Square,
   WifiOff,
+  Phone,
 } from "lucide-react";
 import {
   listSessions,
@@ -47,6 +48,7 @@ const Terminal = dynamic(() => import("@/components/Terminal"), { ssr: false });
 const MessageView = dynamic(() => import("@/components/MessageView"), { ssr: false });
 const GraphView = dynamic(() => import("@/components/GraphView"), { ssr: false });
 const CanvasView = dynamic(() => import("@/components/CanvasView"), { ssr: false });
+const VoiceChatDialog = dynamic(() => import("@/components/VoiceChatDialog"), { ssr: false });
 
 type ViewMode = "terminal" | "messages" | "graph" | "canvas";
 
@@ -69,6 +71,7 @@ export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [messageCount, setMessageCount] = useState<number>(0);
+  const [voiceChatOpen, setVoiceChatOpen] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -594,7 +597,7 @@ export default function Home() {
                 )}
               </button>
 
-              {/* Microphone button */}
+              {/* Microphone button (dictation) */}
               <button
                 type="button"
                 onClick={isRecording ? stopRecording : startRecording}
@@ -604,12 +607,23 @@ export default function Home() {
                     ? "border-red-600 bg-red-950/50 hover:bg-red-900/50"
                     : "border-zinc-800 hover:bg-zinc-800"
                 }`}
+                title="Voice dictation"
               >
                 {isRecording ? (
                   <Square className="w-4 h-4 text-red-400" />
                 ) : (
                   <Mic className="w-4 h-4 text-zinc-400" />
                 )}
+              </button>
+
+              {/* Voice chat button */}
+              <button
+                type="button"
+                onClick={() => setVoiceChatOpen(true)}
+                className="p-2 rounded border border-zinc-800 hover:bg-zinc-800 transition-colors"
+                title="Live voice chat"
+              >
+                <Phone className="w-4 h-4 text-zinc-400" />
               </button>
 
               {/* Message input */}
@@ -638,6 +652,19 @@ export default function Home() {
           )}
         </div>
       </div>
+
+      {/* Voice Chat Dialog */}
+      <VoiceChatDialog
+        open={voiceChatOpen}
+        onOpenChange={setVoiceChatOpen}
+        onTranscript={(text, isUser) => {
+          // Optionally send transcripts to the terminal/chat
+          if (!isUser && selectedSessionId) {
+            // Could send AI response to terminal if needed
+            console.log("AI transcript:", text);
+          }
+        }}
+      />
     </div>
   );
 }
