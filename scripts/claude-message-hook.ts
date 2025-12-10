@@ -77,8 +77,12 @@ interface HookContext {
   // For PostToolUse - tool response/result
   tool_response?: string | Record<string, unknown>;
 
-  // For UserPromptSubmit
+  // For UserPromptSubmit - Claude Code may use either format
   prompt?: string;
+  user_message?: {
+    content?: string;
+    role?: string;
+  };
 
   // For Notification
   message?: string;
@@ -214,7 +218,8 @@ async function getSessionId(claudeSessionId: string, cwd?: string): Promise<stri
   // Not in tmux - try to find an existing session to associate with
   console.log(`[MessageHook] Not in tmux, looking for matching session...`);
 
-  // Strategy 1: Check if there's already a session with this claude_session_id in metadata
+  // Strategy 1: Check if there's already a session with this exact claude_session_id in metadata
+  // This is the most reliable match - same Claude Code instance
   const { data: byMetadata } = await supabase
     .from("terminal_sessions")
     .select("id")
@@ -226,7 +231,20 @@ async function getSessionId(claudeSessionId: string, cwd?: string): Promise<stri
     return byMetadata.id;
   }
 
-  // Strategy 2: Find a session by matching CWD (most likely to be the correct one)
+  // Strategy 2: Check if session already exists with this Claude session ID as its ID
+  const { data: existingById } = await supabase
+    .from("terminal_sessions")
+    .select("id")
+    .eq("id", claudeSessionId)
+    .single();
+
+  if (existingById) {
+    console.log(`[MessageHook] Using existing Claude session: ${claudeSessionId.slice(0, 8)}...`);
+    return existingById.id;
+  }
+
+  // Strategy 3: Find a session by matching CWD that doesn't already have a different claude_session_id
+  // This prevents cross-contamination when multiple Claude instances run in the same directory
   if (cwd) {
     const normalizedCwd = cwd.replace(/\/+$/, "");
     const { data: byCwd } = await supabase
@@ -235,36 +253,34 @@ async function getSessionId(claudeSessionId: string, cwd?: string): Promise<stri
       .eq("cwd", normalizedCwd)
       .eq("status", "running")
       .order("last_activity", { ascending: false })
-      .limit(1)
-      .single();
+      .limit(5);  // Get multiple to check
 
-    if (byCwd) {
-      // Found a session with matching CWD - associate the Claude session ID with it
-      const metadata = (byCwd.metadata as Record<string, unknown>) || {};
-      if (!metadata.claude_session_id) {
-        await supabase
-          .from("terminal_sessions")
-          .update({
-            metadata: { ...metadata, claude_session_id: claudeSessionId },
-          })
-          .eq("id", byCwd.id);
-        console.log(`[MessageHook] Associated Claude session ${claudeSessionId.slice(0, 8)}... with CWD-matched session ${byCwd.id}`);
+    if (byCwd && byCwd.length > 0) {
+      // Find a session that either has no claude_session_id, or has matching claude_session_id
+      for (const session of byCwd) {
+        const metadata = (session.metadata as Record<string, unknown>) || {};
+        const existingClaudeId = metadata.claude_session_id as string | undefined;
+
+        // Skip sessions that already have a DIFFERENT Claude session ID
+        if (existingClaudeId && existingClaudeId !== claudeSessionId) {
+          console.log(`[MessageHook] Skipping session ${session.id} - already has different Claude ID`);
+          continue;
+        }
+
+        // Found a suitable session - associate the Claude session ID with it
+        if (!existingClaudeId) {
+          await supabase
+            .from("terminal_sessions")
+            .update({
+              metadata: { ...metadata, claude_session_id: claudeSessionId },
+            })
+            .eq("id", session.id);
+          console.log(`[MessageHook] Associated Claude session ${claudeSessionId.slice(0, 8)}... with CWD-matched session ${session.id}`);
+        }
+        console.log(`[MessageHook] Found session by CWD: ${session.id}`);
+        return session.id;
       }
-      console.log(`[MessageHook] Found session by CWD: ${byCwd.id}`);
-      return byCwd.id;
     }
-  }
-
-  // Strategy 3: Check if session already exists with this Claude session ID as its ID
-  const { data: existing } = await supabase
-    .from("terminal_sessions")
-    .select("id")
-    .eq("id", claudeSessionId)
-    .single();
-
-  if (existing) {
-    console.log(`[MessageHook] Using existing Claude session: ${claudeSessionId.slice(0, 8)}...`);
-    return existing.id;
   }
 
   // Fallback: Create new session with Claude session ID
@@ -277,6 +293,7 @@ async function getSessionId(claudeSessionId: string, cwd?: string): Promise<stri
       cwd: cwd || process.env.HOME || "/",
       status: "running",
       activity_state: "busy",
+      metadata: { claude_session_id: claudeSessionId },
     })
     .select("id")
     .single();
@@ -319,6 +336,29 @@ async function insertMessage(
   }
 
   return data;
+}
+
+// Update a tool_use message's status when PostToolUse fires
+async function updateToolUseStatus(
+  sessionId: string,
+  toolUseId: string,
+  status: "success" | "error"
+): Promise<boolean> {
+  // Find the tool_use message with this toolUseId and update its status
+  const { error } = await supabase
+    .from("claude_code_messages")
+    .update({ tool_status: status })
+    .eq("session_id", sessionId)
+    .eq("message_type", "tool_use")
+    .eq("tool_status", "pending")
+    .filter("metadata->>toolUseId", "eq", toolUseId);
+
+  if (error) {
+    console.error("Failed to update tool_use status:", error.message);
+    return false;
+  }
+
+  return true;
 }
 
 // Format tool input for display based on tool type
@@ -386,27 +426,136 @@ function formatToolResult(toolName: string, response: string | Record<string, un
     case "Bash":
       // Bash results often have stdout/stderr
       if ("stdout" in response) {
-        return String(response.stdout || "");
+        const stdout = String(response.stdout || "");
+        const stderr = String(response.stderr || "");
+        if (stderr && stdout) {
+          return `${stdout}\n\n**stderr:**\n${stderr}`;
+        }
+        return stdout || stderr || "(no output)";
       }
       break;
 
     case "Glob":
       // Glob returns file list
       if (Array.isArray(response)) {
-        return response.join("\n");
+        const files = response as string[];
+        if (files.length === 0) return "(no files found)";
+        if (files.length <= 20) return files.join("\n");
+        return `${files.slice(0, 20).join("\n")}\n... and ${files.length - 20} more files`;
       }
       break;
 
     case "Grep":
       // Grep returns matches
       if (Array.isArray(response)) {
-        return response.join("\n");
+        const matches = response as string[];
+        if (matches.length === 0) return "(no matches)";
+        if (matches.length <= 30) return matches.join("\n");
+        return `${matches.slice(0, 30).join("\n")}\n... and ${matches.length - 30} more matches`;
       }
       break;
+
+    case "Edit":
+      // Edit returns success/failure info
+      if ("filePath" in response || "file_path" in response) {
+        const filePath = String(response.filePath || response.file_path || "");
+        return `Edited \`${filePath}\``;
+      }
+      return "Edit completed";
+
+    case "Write":
+      // Write returns file path
+      if ("filePath" in response || "file_path" in response) {
+        const filePath = String(response.filePath || response.file_path || "");
+        return `Wrote \`${filePath}\``;
+      }
+      return "Write completed";
+
+    case "Read":
+      // Read returns file content - truncate for display
+      if ("content" in response) {
+        const content = String(response.content || "");
+        if (content.length > 500) {
+          return `\`\`\`\n${content.substring(0, 500)}...\n\`\`\`\n(${content.length} total characters)`;
+        }
+        return `\`\`\`\n${content}\n\`\`\``;
+      }
+      break;
+
+    case "WebFetch":
+      // WebFetch returns fetched content summary
+      if ("content" in response) {
+        const content = String(response.content || "");
+        if (content.length > 500) {
+          return `${content.substring(0, 500)}...\n\n(${content.length} total characters)`;
+        }
+        return content;
+      }
+      break;
+
+    case "WebSearch":
+      // WebSearch returns search results
+      if ("results" in response && Array.isArray(response.results)) {
+        const results = response.results as Array<{ title?: string; url?: string; snippet?: string }>;
+        if (results.length === 0) return "(no results)";
+        return results
+          .slice(0, 5)
+          .map((r, i) => `${i + 1}. **${r.title || "Untitled"}**\n   ${r.url || ""}\n   ${r.snippet || ""}`)
+          .join("\n\n");
+      }
+      break;
+
+    case "Task":
+      // Task (agent) returns completion info
+      if ("result" in response) {
+        return String(response.result || "Task completed");
+      }
+      return "Task completed";
+
+    case "TodoWrite":
+      // TodoWrite returns updated list
+      return "Todo list updated";
+
+    case "AskUserQuestion":
+      // Should be handled separately, but just in case
+      return "Question asked";
   }
 
-  // Default: JSON stringify
-  return JSON.stringify(response, null, 2);
+  // Default: show formatted JSON
+  const keys = Object.keys(response);
+  if (keys.length === 0) {
+    return "(empty response)";
+  }
+
+  // Helper to safely stringify values
+  const stringify = (val: unknown): string => {
+    if (val === null || val === undefined) return "null";
+    if (typeof val === "string") return val.length > 200 ? val.substring(0, 200) + "..." : val;
+    if (typeof val === "number" || typeof val === "boolean") return String(val);
+    if (Array.isArray(val)) {
+      if (val.length === 0) return "[]";
+      if (val.length <= 3) return JSON.stringify(val);
+      return `[${val.length} items]`;
+    }
+    if (typeof val === "object") {
+      const objKeys = Object.keys(val);
+      if (objKeys.length === 0) return "{}";
+      return `{${objKeys.slice(0, 3).join(", ")}${objKeys.length > 3 ? ", ..." : ""}}`;
+    }
+    return String(val);
+  };
+
+  if (keys.length <= 5) {
+    // Small object - show key: value pairs
+    return keys.map(k => `**${k}:** ${stringify((response as Record<string, unknown>)[k])}`).join("\n");
+  }
+
+  // Larger object - show as truncated JSON
+  const json = JSON.stringify(response, null, 2);
+  if (json.length > 1000) {
+    return `\`\`\`json\n${json.substring(0, 1000)}...\n\`\`\``;
+  }
+  return `\`\`\`json\n${json}\n\`\`\``;
 }
 
 // Parse the last N assistant messages from transcript to get final output
@@ -506,6 +655,11 @@ async function handleHookEvent(context: HookContext): Promise<void> {
         break;
       }
 
+      // Update the original tool_use message's status to success
+      if (context.tool_use_id) {
+        await updateToolUseStatus(terminalSessionId, context.tool_use_id, "success");
+      }
+
       // Capture tool results
       const toolResponse = context.tool_response;
       let content = formatToolResult(toolName, toolResponse);
@@ -529,9 +683,13 @@ async function handleHookEvent(context: HookContext): Promise<void> {
     }
 
     case "UserPromptSubmit": {
-      if (context.prompt) {
-        await insertMessage(terminalSessionId, "user_prompt", context.prompt);
-        console.log(`[MessageHook] Captured user prompt`);
+      // Claude Code sends user_message.content for the prompt text
+      const promptText = context.prompt || context.user_message?.content;
+      if (promptText) {
+        await insertMessage(terminalSessionId, "user_prompt", promptText);
+        console.log(`[MessageHook] Captured user prompt: "${promptText.slice(0, 50)}..."`);
+      } else {
+        console.log(`[MessageHook] UserPromptSubmit received but no prompt text found. Context keys: ${Object.keys(context).join(", ")}`);
       }
       break;
     }

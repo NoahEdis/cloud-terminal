@@ -214,12 +214,20 @@ export async function createChat(config: ChatConfig): Promise<ChatInfo> {
 }
 
 export async function killChat(id: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/api/sessions/${id}`, {
+  const url = `${getApiUrl()}/api/sessions/${encodeURIComponent(id)}`;
+  console.log(`[API] killChat: DELETE ${url}`);
+
+  const res = await fetch(url, {
     method: "DELETE",
     headers: headers(),
   });
+
+  console.log(`[API] killChat response: ${res.status} ${res.statusText}`);
+
   if (!res.ok && res.status !== 404) {
-    throw new Error(`HTTP ${res.status}`);
+    const errorText = await res.text().catch(() => "");
+    console.error(`[API] killChat error: ${errorText}`);
+    throw new Error(`HTTP ${res.status}: ${errorText}`);
   }
 }
 

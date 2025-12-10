@@ -25,7 +25,7 @@ import {
   History,
   AlertTriangle,
   Bot,
-  Key,
+  Plug,
   MonitorSmartphone,
   Cloud,
   Brain,
@@ -394,6 +394,8 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
   const handleKill = async (id: string) => {
     if (!confirm("Kill this session?")) return;
 
+    console.log(`[ChatList] Killing session: ${id}`);
+
     try {
       // Find the session to archive it before killing
       const sessionToKill = sessions.find((s) => getSessionId(s) === id);
@@ -408,7 +410,9 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
         setArchivedSessionsState(getArchivedSessions());
       }
 
+      console.log(`[ChatList] Calling killSession API for: ${id}`);
       await killSession(id);
+      console.log(`[ChatList] killSession completed for: ${id}`);
 
       // Calculate remaining sessions before updating state
       const remainingSessions = sessions.filter((s) => getSessionId(s) !== id);
@@ -423,6 +427,7 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
         }
       }
     } catch (e) {
+      console.error(`[ChatList] Failed to kill session ${id}:`, e);
       setError(e instanceof Error ? e.message : "Failed to kill session");
     }
   };
@@ -1086,11 +1091,11 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
           <span>Brain</span>
         </button>
         <button
-          onClick={() => router.push("/credentials")}
+          onClick={() => router.push("/integrations")}
           className="w-full flex items-center gap-2 px-2 py-1.5 text-[12px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 rounded transition-colors"
         >
-          <Key className="w-4 h-4" />
-          <span>Credentials</span>
+          <Plug className="w-4 h-4" />
+          <span>Integrations</span>
         </button>
       </div>
 
