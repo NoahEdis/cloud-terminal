@@ -6,6 +6,7 @@ import {
   Terminal as TerminalIcon,
   MessageSquare,
   Network,
+  Layers,
   PanelLeftClose,
   PanelLeft,
   ArrowUp,
@@ -45,8 +46,9 @@ import ChatList from "@/components/ChatList";
 const Terminal = dynamic(() => import("@/components/Terminal"), { ssr: false });
 const MessageView = dynamic(() => import("@/components/MessageView"), { ssr: false });
 const GraphView = dynamic(() => import("@/components/GraphView"), { ssr: false });
+const CanvasView = dynamic(() => import("@/components/CanvasView"), { ssr: false });
 
-type ViewMode = "terminal" | "messages" | "graph";
+type ViewMode = "terminal" | "messages" | "graph" | "canvas";
 
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 500;
@@ -335,7 +337,7 @@ export default function Home() {
           </button>
 
           <span className="text-[13px] font-medium text-zinc-100">
-            {viewMode === "terminal" ? "Terminal" : viewMode === "messages" ? "Messages" : "Knowledge Graph"}
+            {viewMode === "terminal" ? "Terminal" : viewMode === "messages" ? "Messages" : viewMode === "graph" ? "Knowledge Graph" : "Canvas"}
           </span>
 
           {viewMode === "terminal" && sessions.length > 0 && (
@@ -417,6 +419,15 @@ export default function Home() {
             <Network className="w-3 h-3" />
             <span className="hidden sm:inline">Graph</span>
           </button>
+          <button
+            onClick={() => setViewMode("canvas")}
+            className={`flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors ${
+              viewMode === "canvas" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            <Layers className="w-3 h-3" />
+            <span className="hidden sm:inline">Canvas</span>
+          </button>
         </div>
       </header>
 
@@ -486,13 +497,15 @@ export default function Home() {
                   </div>
                 </div>
               )
-            ) : (
+            ) : viewMode === "graph" ? (
               <GraphView />
+            ) : (
+              <CanvasView sessionId={selectedSessionId || undefined} />
             )}
           </div>
 
-          {/* Input bar - hidden in graph mode */}
-          {viewMode !== "graph" && (
+          {/* Input bar - hidden in graph and canvas modes */}
+          {viewMode !== "graph" && viewMode !== "canvas" && (
           <div className="border-t border-zinc-800 p-2.5 bg-zinc-950">
             {error && (
               <div className="mb-2 px-2.5 py-1.5 text-[12px] text-red-400 bg-red-950/50 rounded flex items-center justify-between">
