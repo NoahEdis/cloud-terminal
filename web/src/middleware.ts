@@ -5,9 +5,10 @@ export default auth((req) => {
   const pathname = req.nextUrl.pathname;
   const isAuthRoute = pathname.startsWith("/api/auth");
   const isApiRoute = pathname.startsWith("/api/");
+  const isDiagramsRoute = pathname.startsWith("/api/diagrams");
 
-  // Always allow auth routes
-  if (isAuthRoute) {
+  // Always allow auth routes and diagrams (public)
+  if (isAuthRoute || isDiagramsRoute) {
     return;
   }
 
