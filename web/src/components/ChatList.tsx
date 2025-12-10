@@ -1082,7 +1082,7 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
       </ScrollArea>
 
       {/* Footer with Brain and Credentials buttons */}
-      <div className="px-3 py-2 border-t border-zinc-800 space-y-1">
+      <div className="px-3 py-2 pb-8 border-t border-zinc-800 space-y-1">
         <button
           onClick={() => router.push("/brain")}
           className="w-full flex items-center gap-2 px-2 py-1.5 text-[12px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 rounded transition-colors"

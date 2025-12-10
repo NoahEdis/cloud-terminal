@@ -667,8 +667,8 @@ export default function Home() {
       />
 
       {/* Version indicator */}
-      <div className="fixed bottom-2 right-2 px-2 py-1 rounded bg-zinc-900/80 border border-zinc-800/50 text-[10px] text-zinc-600 font-mono z-50">
-        v0.2.1
+      <div className="fixed bottom-2 left-2 px-2 py-1 rounded bg-zinc-900/80 border border-zinc-800/50 text-[10px] text-zinc-600 font-mono z-50">
+        v0.2.2
       </div>
     </div>
   );
