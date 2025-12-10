@@ -34,6 +34,42 @@ function detectPrompt(buffer: string): boolean {
   return PROMPT_PATTERNS.some(pattern => pattern.test(lastLine));
 }
 
+/**
+ * Clean malformed escape sequences from terminal output.
+ * This prevents garbage characters like ^[[ from appearing in the terminal.
+ */
+function cleanTerminalOutput(data: string): string {
+  let cleaned = data;
+
+  // Remove orphaned OSC sequences (Operating System Commands) without proper ESC prefix
+  // These look like ]0;title or ]10;color etc.
+  cleaned = cleaned.replace(/\]1[0-9];[^\x07\x1b\n]*(?:\x07|\x1b\\|\\)?/g, "");
+  cleaned = cleaned.replace(/\][0-9];[^\x07\x1b\n]*(?:\x07|\x1b\\|\\)?/g, "");
+
+  // Remove Device Attributes responses (DA1, DA2)
+  // These look like ?64;1;2c or >1;1;0c
+  cleaned = cleaned.replace(/\?[\d;]+c/g, "");
+  cleaned = cleaned.replace(/>[\d;]+c/g, "");
+
+  // Remove orphaned CSI sequences without proper ESC prefix
+  // CSI sequences start with [ followed by parameters and a letter
+  // But we need to be careful not to remove valid content
+  cleaned = cleaned.replace(/(?<!\x1b)\[[\d;]*[A-HJKSTfm]/g, "");
+
+  // Remove incomplete/broken escape sequences
+  // Pattern: ESC followed by [ but then garbage or another ESC
+  cleaned = cleaned.replace(/\x1b\[\x1b/g, "\x1b");
+
+  // Remove double ESC-[ sequences (the main cause of ^[[^[[ garbage)
+  cleaned = cleaned.replace(/\x1b\[\x1b\[/g, "\x1b[");
+
+  // Remove bare ESC characters not followed by valid sequence starters
+  // Valid starters: [ (CSI), ] (OSC), ( ) * + (charset), = > (keypad), 7 8 (save/restore)
+  cleaned = cleaned.replace(/\x1b(?![\[\]()=*+>78DEMNOPHVWXYZ\\^_c])/g, "");
+
+  return cleaned;
+}
+
 export class SessionManager {
   private sessions = new Map<string, Session>();
   private cleanupInterval: NodeJS.Timeout;
@@ -81,9 +117,12 @@ export class SessionManager {
     };
 
     // Handle PTY output
-    ptyProcess.onData((data: string) => {
+    ptyProcess.onData((rawData: string) => {
       session.lastActivity = new Date();
       session.lastOutputTime = new Date();
+
+      // Clean malformed escape sequences before processing
+      const data = cleanTerminalOutput(rawData);
 
       // Append to buffer, trim if too large
       session.outputBuffer += data;
