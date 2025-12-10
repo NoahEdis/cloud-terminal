@@ -76,9 +76,9 @@ fi
 curl "${CURL_ARGS[@]}" > /dev/null 2>&1 &
 
 # Also send to message hook for structured message capture (Telegram integration)
-# Only for relevant events: PreToolUse (for AskUserQuestion), UserPromptSubmit, Stop, Notification
+# Events: PreToolUse (tool calls), PostToolUse (tool results), UserPromptSubmit, Stop, Notification
 SCRIPT_DIR="$(dirname "$0")"
-if [ "$EVENT_TYPE" = "PreToolUse" ] || [ "$EVENT_TYPE" = "UserPromptSubmit" ] || [ "$EVENT_TYPE" = "Stop" ] || [ "$EVENT_TYPE" = "Notification" ]; then
+if [ "$EVENT_TYPE" = "PreToolUse" ] || [ "$EVENT_TYPE" = "PostToolUse" ] || [ "$EVENT_TYPE" = "UserPromptSubmit" ] || [ "$EVENT_TYPE" = "Stop" ] || [ "$EVENT_TYPE" = "Notification" ]; then
   # Pass the full hook context to the message hook
   echo "$HOOK_CONTEXT" | npx tsx "$SCRIPT_DIR/claude-message-hook.ts" > /dev/null 2>&1 &
 fi

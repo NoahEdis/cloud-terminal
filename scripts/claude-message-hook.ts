@@ -69,10 +69,13 @@ interface HookContext {
   permission_mode?: string;
   hook_event_name: string;
 
-  // For PreToolUse
+  // For PreToolUse and PostToolUse
   tool_name?: string;
   tool_input?: Record<string, unknown>;
   tool_use_id?: string;
+
+  // For PostToolUse - tool response/result
+  tool_response?: string | Record<string, unknown>;
 
   // For UserPromptSubmit
   prompt?: string;
@@ -318,6 +321,94 @@ async function insertMessage(
   return data;
 }
 
+// Format tool input for display based on tool type
+function formatToolInput(toolName: string, input: Record<string, unknown>): string {
+  switch (toolName) {
+    case "Bash":
+      return `\`\`\`bash\n${input.command || ""}\n\`\`\``;
+
+    case "Read":
+      return `Reading file: \`${input.file_path || ""}\``;
+
+    case "Write":
+      const writeContent = String(input.content || "").substring(0, 500);
+      const truncated = String(input.content || "").length > 500 ? "\n... (truncated)" : "";
+      return `Writing to: \`${input.file_path || ""}\`\n\`\`\`\n${writeContent}${truncated}\n\`\`\``;
+
+    case "Edit":
+      return `Editing: \`${input.file_path || ""}\`\nReplacing:\n\`\`\`\n${String(input.old_string || "").substring(0, 200)}\n\`\`\`\nWith:\n\`\`\`\n${String(input.new_string || "").substring(0, 200)}\n\`\`\``;
+
+    case "Glob":
+      return `Glob pattern: \`${input.pattern || ""}\`${input.path ? ` in \`${input.path}\`` : ""}`;
+
+    case "Grep":
+      return `Grep pattern: \`${input.pattern || ""}\`${input.path ? ` in \`${input.path}\`` : ""}`;
+
+    case "Task":
+      return `Spawning agent: ${input.description || "task"}\n${input.prompt ? `Prompt: ${String(input.prompt).substring(0, 300)}...` : ""}`;
+
+    case "WebFetch":
+      return `Fetching: ${input.url || ""}`;
+
+    case "WebSearch":
+      return `Searching: ${input.query || ""}`;
+
+    case "TodoWrite":
+      const todos = input.todos as Array<{ content: string; status: string }> | undefined;
+      if (todos && Array.isArray(todos)) {
+        return `Updating todos:\n${todos.map((t) => `- [${t.status}] ${t.content}`).join("\n")}`;
+      }
+      return "Updating todo list";
+
+    default:
+      // For unknown tools, show a formatted JSON summary
+      const summary = JSON.stringify(input, null, 2);
+      if (summary.length > 500) {
+        return `Tool input:\n\`\`\`json\n${summary.substring(0, 500)}...\n\`\`\``;
+      }
+      return `Tool input:\n\`\`\`json\n${summary}\n\`\`\``;
+  }
+}
+
+// Format tool result for display
+function formatToolResult(toolName: string, response: string | Record<string, unknown> | undefined): string {
+  if (response === undefined || response === null) {
+    return "(no output)";
+  }
+
+  // If it's already a string, use it directly
+  if (typeof response === "string") {
+    return response;
+  }
+
+  // For objects, format based on tool type
+  switch (toolName) {
+    case "Bash":
+      // Bash results often have stdout/stderr
+      if ("stdout" in response) {
+        return String(response.stdout || "");
+      }
+      break;
+
+    case "Glob":
+      // Glob returns file list
+      if (Array.isArray(response)) {
+        return response.join("\n");
+      }
+      break;
+
+    case "Grep":
+      // Grep returns matches
+      if (Array.isArray(response)) {
+        return response.join("\n");
+      }
+      break;
+  }
+
+  // Default: JSON stringify
+  return JSON.stringify(response, null, 2);
+}
+
 // Parse the last N assistant messages from transcript to get final output
 function getRecentAssistantOutput(transcriptPath: string, maxLines = 50): string {
   if (!existsSync(transcriptPath)) {
@@ -362,8 +453,10 @@ async function handleHookEvent(context: HookContext): Promise<void> {
 
   switch (hook_event_name) {
     case "PreToolUse": {
-      // Check if this is AskUserQuestion
-      if (context.tool_name === "AskUserQuestion" && context.tool_input) {
+      const toolName = context.tool_name || "unknown";
+
+      // Special handling for AskUserQuestion - store as user_question type
+      if (toolName === "AskUserQuestion" && context.tool_input) {
         const input = context.tool_input as unknown as AskUserQuestionInput;
 
         for (const question of input.questions || []) {
@@ -384,7 +477,54 @@ async function handleHookEvent(context: HookContext): Promise<void> {
 
           console.log(`[MessageHook] Captured AskUserQuestion: "${question.header}"`);
         }
+      } else {
+        // Capture ALL other tool invocations as tool_use
+        const toolInput = context.tool_input || {};
+
+        // Format the tool input for display
+        let content = formatToolInput(toolName, toolInput);
+
+        await insertMessage(terminalSessionId, "tool_use", content, {
+          toolName,
+          toolStatus: "pending",
+          metadata: {
+            toolUseId: context.tool_use_id,
+            toolInput: toolInput,
+          },
+        });
+
+        console.log(`[MessageHook] Captured tool_use: ${toolName}`);
       }
+      break;
+    }
+
+    case "PostToolUse": {
+      const toolName = context.tool_name || "unknown";
+
+      // Skip AskUserQuestion results - the response is handled separately
+      if (toolName === "AskUserQuestion") {
+        break;
+      }
+
+      // Capture tool results
+      const toolResponse = context.tool_response;
+      let content = formatToolResult(toolName, toolResponse);
+
+      // Truncate very long results (e.g., file contents)
+      const maxLength = 10000;
+      if (content.length > maxLength) {
+        content = content.substring(0, maxLength) + `\n\n... (truncated, ${content.length - maxLength} more characters)`;
+      }
+
+      await insertMessage(terminalSessionId, "tool_result", content, {
+        toolName,
+        toolStatus: "success",
+        metadata: {
+          toolUseId: context.tool_use_id,
+        },
+      });
+
+      console.log(`[MessageHook] Captured tool_result: ${toolName} (${content.length} chars)`);
       break;
     }
 

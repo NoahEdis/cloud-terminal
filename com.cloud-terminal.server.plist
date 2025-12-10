@@ -7,7 +7,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/node</string>
+        <string>/Users/noahedis/.nvm/versions/node/v22.18.0/bin/node</string>
         <string>/Users/noahedis/new-mcp-structure/cloud-terminal/dist/index.js</string>
     </array>
 
@@ -23,7 +23,7 @@
         <key>MODE</key>
         <string>tmux</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>/Users/noahedis/.nvm/versions/node/v22.18.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 
     <!-- Run at load (boot/login) -->

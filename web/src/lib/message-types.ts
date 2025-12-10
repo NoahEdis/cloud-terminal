@@ -7,7 +7,8 @@ export type MessageType =
   | "user_prompt"     // User's input to Claude
   | "assistant"       // Claude's response text
   | "user_question"   // AskUserQuestion tool invocation
-  | "tool_use"        // Tool execution event
+  | "tool_use"        // Tool invocation (PreToolUse) - shows tool name and input
+  | "tool_result"     // Tool result (PostToolUse) - shows tool output
   | "final_output"    // Final response when Claude stops
   | "error";          // Error messages
 

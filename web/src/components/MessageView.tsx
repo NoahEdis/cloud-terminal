@@ -19,6 +19,7 @@ import {
   Loader2,
   Copy,
   Check,
+  CornerDownRight,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import type { ClaudeCodeMessage, MessageType, QuestionOption } from "@/lib/message-types";
@@ -79,7 +80,13 @@ const messageConfig: Record<MessageType, {
   tool_use: {
     icon: Wrench,
     label: "Tool",
-    borderColor: "border-zinc-800",
+    borderColor: "border-blue-900/40",
+    iconColor: "text-blue-400",
+  },
+  tool_result: {
+    icon: CornerDownRight,
+    label: "Result",
+    borderColor: "border-zinc-800/60",
     iconColor: "text-zinc-500",
   },
   final_output: {
@@ -145,7 +152,7 @@ function MessageCard({
         <div className="flex items-center gap-2">
           <Icon className={`w-3.5 h-3.5 ${config.iconColor}`} />
           <span className="text-[12px] font-medium text-zinc-300">{config.label}</span>
-          {message.message_type === "tool_use" && message.tool_name && (
+          {(message.message_type === "tool_use" || message.message_type === "tool_result") && message.tool_name && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono">
               {message.tool_name}
             </span>
