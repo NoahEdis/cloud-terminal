@@ -1,7 +1,7 @@
 import * as pty from "node-pty";
 import { v4 as uuidv4 } from "uuid";
 import type { WebSocket } from "ws";
-import type { Session, SessionConfig, SessionInfo, ActivityState, HookEvent } from "./types.js";
+import type { Session, SessionConfig, SessionInfo, ActivityState, HookEvent, TaskStatus } from "./types.js";
 import * as supabase from "./supabase.js";
 
 const MAX_BUFFER_SIZE = 100_000; // ~2000 lines of 50 chars
@@ -114,6 +114,12 @@ export class SessionManager {
       status: "running",
       activityState: "busy", // Starts busy until first prompt appears
       externallyControlled: false, // Will be set true when Claude Code hooks update state
+      // Task status tracking for visual indicators
+      currentTool: null,
+      taskStartTime: null,
+      toolUseCount: 0,
+      tokenCount: 0,
+      taskCompletedAt: null,
     };
 
     // Handle PTY output
@@ -210,6 +216,14 @@ export class SessionManager {
       exitCode: s.exitCode,
       clientCount: s.clients.size,
       activityState: s.activityState,
+      taskStatus: {
+        activityState: s.activityState,
+        currentTool: s.currentTool,
+        taskStartTime: s.taskStartTime?.toISOString() ?? null,
+        toolUseCount: s.toolUseCount,
+        tokenCount: s.tokenCount,
+        taskCompletedAt: s.taskCompletedAt?.toISOString() ?? null,
+      },
     }));
   }
 
@@ -337,7 +351,12 @@ export class SessionManager {
   }
 
   // Update activity state for a session (called by Claude Code hooks)
-  setActivityState(id: string, state: ActivityState): boolean {
+  setActivityState(
+    id: string,
+    state: ActivityState,
+    hookEvent?: HookEvent,
+    toolName?: string
+  ): boolean {
     const session = this.sessions.get(id);
     if (!session) return false;
 
@@ -349,24 +368,82 @@ export class SessionManager {
     // Once a hook updates the state, disable prompt-based detection for this session
     session.externallyControlled = true;
 
+    // Track task lifecycle based on hook event
+    if (hookEvent === "UserPromptSubmit") {
+      // New task started - reset counters
+      session.currentTool = null;
+      session.taskStartTime = new Date();
+      session.toolUseCount = 0;
+      session.taskCompletedAt = null;
+    } else if (hookEvent === "PreToolUse") {
+      // Tool is starting
+      session.currentTool = toolName ?? null;
+      session.toolUseCount++;
+      // If no task start time yet, set it now
+      if (!session.taskStartTime) {
+        session.taskStartTime = new Date();
+      }
+    } else if (hookEvent === "PostToolUse") {
+      // Tool finished, clear current tool but stay busy
+      session.currentTool = null;
+    } else if (hookEvent === "Stop" || hookEvent === "Notification") {
+      // Task completed - mark completion time
+      session.currentTool = null;
+      session.taskCompletedAt = new Date();
+    } else if (hookEvent === "SessionEnd") {
+      // Session ended - clear everything
+      session.currentTool = null;
+      session.taskCompletedAt = new Date();
+    }
+
+    // Build task status for broadcast
+    const taskStatus = {
+      activityState: session.activityState,
+      currentTool: session.currentTool,
+      taskStartTime: session.taskStartTime?.toISOString() ?? null,
+      toolUseCount: session.toolUseCount,
+      tokenCount: session.tokenCount,
+      taskCompletedAt: session.taskCompletedAt?.toISOString() ?? null,
+    };
+
     // Broadcast activity state change to connected clients
-    const message = JSON.stringify({ type: "activity", state });
+    const message = JSON.stringify({ type: "activity", state, taskStatus });
     for (const client of session.clients) {
       if (client.readyState === 1) {
         client.send(message);
       }
     }
 
-    console.log(`[SessionManager] Session ${id} activity state -> ${state}`);
+    console.log(`[SessionManager] Session ${id} activity state -> ${state}${hookEvent ? ` (${hookEvent})` : ""}${toolName ? ` tool: ${toolName}` : ""}`);
 
     // Persist to Supabase
     supabase.updateSessionStatus(id, {
       activityState: state,
       externallyControlled: true,
       lastActivity: session.lastActivity,
+      currentTool: session.currentTool,
+      taskStartTime: session.taskStartTime,
+      toolUseCount: session.toolUseCount,
+      tokenCount: session.tokenCount,
+      taskCompletedAt: session.taskCompletedAt,
     });
 
     return true;
+  }
+
+  // Get task status for a session (for API endpoint)
+  getTaskStatus(id: string): TaskStatus | null {
+    const session = this.sessions.get(id);
+    if (!session) return null;
+
+    return {
+      activityState: session.activityState,
+      currentTool: session.currentTool,
+      taskStartTime: session.taskStartTime?.toISOString() ?? null,
+      toolUseCount: session.toolUseCount,
+      tokenCount: session.tokenCount,
+      taskCompletedAt: session.taskCompletedAt?.toISOString() ?? null,
+    };
   }
 }
 

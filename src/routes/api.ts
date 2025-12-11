@@ -177,7 +177,7 @@ api.post("/hook", async (c) => {
   // This prevents the bug where all terminals in the same directory get updated
   const targetId = body.session_id || body.session_name;
   if (targetId) {
-    const success = sessionManager.setActivityState(targetId, newState);
+    const success = sessionManager.setActivityState(targetId, newState, body.event, body.tool_name);
     if (success) {
       updatedCount++;
       targetedSession = targetId;
@@ -188,7 +188,7 @@ api.post("/hook", async (c) => {
   else if (body.cwd) {
     const sessions = sessionManager.findByCwd(body.cwd);
     for (const session of sessions) {
-      const success = sessionManager.setActivityState(session.id, newState);
+      const success = sessionManager.setActivityState(session.id, newState, body.event, body.tool_name);
       if (success) updatedCount++;
     }
     targetedSession = `cwd:${body.cwd} (${sessions.length} matches)`;
@@ -219,6 +219,18 @@ api.post("/sessions/:id/activity", async (c) => {
   }
 
   return c.json({ success: true, state: body.state });
+});
+
+// Get task status for a session (for rich visual indicators)
+api.get("/sessions/:id/task-status", (c) => {
+  const id = c.req.param("id");
+  const taskStatus = sessionManager.getTaskStatus(id);
+
+  if (!taskStatus) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  return c.json(taskStatus);
 });
 
 // Upload an image and return the file path for Claude Code

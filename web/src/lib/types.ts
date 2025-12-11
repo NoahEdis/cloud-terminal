@@ -2,6 +2,16 @@ export type ActivityState = "idle" | "busy" | "exited";
 
 export type ChatType = "claude" | "custom";
 
+// Task status for rich visual indicators
+export interface TaskStatus {
+  activityState: ActivityState;
+  currentTool: string | null;
+  taskStartTime: string | null;  // ISO timestamp
+  toolUseCount: number;
+  tokenCount: number;
+  taskCompletedAt: string | null;  // ISO timestamp
+}
+
 export interface ChatMetrics {
   // Total number of newlines in output (actual lines of content)
   lineCount: number;
@@ -41,6 +51,8 @@ export interface ChatInfo {
   metrics?: ChatMetrics;
   // Chat type for determining available features
   chatType?: ChatType;
+  // Task status for visual indicators
+  taskStatus?: TaskStatus;
 }
 
 // Helper to get chat identifier (works with both tmux and PTY modes)
@@ -84,7 +96,7 @@ export type WebSocketMessage =
   | { type: "history"; data: string }
   | { type: "exit"; code: number }
   | { type: "error"; message: string }
-  | { type: "activity"; state: ActivityState }
+  | { type: "activity"; state: ActivityState; taskStatus?: TaskStatus }
   | { type: "ping"; timestamp: number };
 
 export type ClientMessage =

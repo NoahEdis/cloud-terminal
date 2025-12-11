@@ -216,7 +216,12 @@ tmuxApi.post("/hook", async (c) => {
   // PRIORITY 1: If session_name provided, ONLY update that specific session
   // This prevents the bug where all terminals in the same directory get updated
   if (body.session_name) {
-    const success = tmuxSessionManager.setActivityState(body.session_name, newState);
+    const success = tmuxSessionManager.setActivityState(
+      body.session_name,
+      newState,
+      body.event,
+      body.tool_name
+    );
     if (success) {
       updatedCount++;
       targetedSession = body.session_name;
@@ -227,7 +232,12 @@ tmuxApi.post("/hook", async (c) => {
   else if (body.cwd) {
     const sessions = tmuxSessionManager.findByCwd(body.cwd);
     for (const session of sessions) {
-      const success = tmuxSessionManager.setActivityState(session.name, newState);
+      const success = tmuxSessionManager.setActivityState(
+        session.name,
+        newState,
+        body.event,
+        body.tool_name
+      );
       if (success) updatedCount++;
     }
     targetedSession = `cwd:${body.cwd} (${sessions.length} matches)`;
@@ -240,6 +250,18 @@ tmuxApi.post("/hook", async (c) => {
   console.log(`[Hook] ${body.event} -> ${newState} | target: ${targetedSession || "none"} | updated: ${updatedCount}${body.tool_name ? ` | tool: ${body.tool_name}` : ""}`);
 
   return c.json({ success: true, updated: updatedCount, state: newState, target: targetedSession });
+});
+
+// Get task status for a session (for rich visual indicators)
+tmuxApi.get("/sessions/:name/task-status", (c) => {
+  const name = c.req.param("name");
+  const taskStatus = tmuxSessionManager.getTaskStatus(name);
+
+  if (!taskStatus) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  return c.json(taskStatus);
 });
 
 // Capture tmux pane history - useful for feeding context to Claude Code

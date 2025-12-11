@@ -26,8 +26,9 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import type { ClaudeCodeMessage, MessageType, QuestionOption } from "@/lib/message-types";
-import type { ActivityState } from "@/lib/types";
+import type { ActivityState, TaskStatus } from "@/lib/types";
 import { getSessionMessages, answerQuestion, subscribeToMessages, getChat } from "@/lib/api";
+import StatusIndicator from "./StatusIndicator";
 
 // Number of messages to load initially and per page
 const INITIAL_MESSAGE_COUNT = 50;
@@ -369,44 +370,6 @@ function MessageCard({
   );
 }
 
-// Activity state indicator component
-function ActivityIndicator({ state, isConnected }: { state: ActivityState | null; isConnected: boolean }) {
-  if (!isConnected) {
-    return (
-      <div className="flex items-center gap-1.5 text-[10px] text-zinc-500">
-        <Circle className="w-2 h-2" />
-        <span>Disconnected</span>
-      </div>
-    );
-  }
-
-  if (state === "busy") {
-    return (
-      <div className="flex items-center gap-1.5 text-[10px] text-amber-400">
-        <Loader2 className="w-2.5 h-2.5 animate-spin" />
-        <span>Working...</span>
-      </div>
-    );
-  }
-
-  if (state === "exited") {
-    return (
-      <div className="flex items-center gap-1.5 text-[10px] text-zinc-500">
-        <XCircle className="w-2.5 h-2.5" />
-        <span>Session ended</span>
-      </div>
-    );
-  }
-
-  // idle or unknown
-  return (
-    <div className="flex items-center gap-1.5 text-[10px] text-emerald-400">
-      <Circle className="w-2 h-2 fill-current" />
-      <span>Ready</span>
-    </div>
-  );
-}
-
 // Main MessageView component
 export default function MessageView({
   sessionId,
@@ -420,6 +383,7 @@ export default function MessageView({
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activityState, setActivityState] = useState<ActivityState | null>(null);
+  const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [userHasScrolled, setUserHasScrolled] = useState(false);
@@ -455,11 +419,14 @@ export default function MessageView({
           setHasMoreMessages(recentMessages.length >= INITIAL_MESSAGE_COUNT);
         }
 
-        // Also fetch session info to get activity state
+        // Also fetch session info to get activity state and task status
         try {
           const chat = await getChat(sessionId);
           setActivityState(chat.activityState || null);
           setIsConnected(chat.status === "running");
+          if (chat.taskStatus) {
+            setTaskStatus(chat.taskStatus);
+          }
         } catch {
           // Session might not exist yet in terminal_sessions
           setIsConnected(false);
@@ -543,20 +510,23 @@ export default function MessageView({
     }
   }, [hasMoreMessages, isLoadingMore, loadMoreMessages]);
 
-  // Poll for session activity state changes
+  // Poll for session activity state and task status changes
   useEffect(() => {
-    const pollActivityState = async () => {
+    const pollTaskStatus = async () => {
       try {
         const chat = await getChat(sessionId);
         setActivityState(chat.activityState || null);
         setIsConnected(chat.status === "running");
+        if (chat.taskStatus) {
+          setTaskStatus(chat.taskStatus);
+        }
       } catch {
         // Ignore errors during polling
       }
     };
 
-    // Poll every 2 seconds
-    const interval = setInterval(pollActivityState, 2000);
+    // Poll every 1 second for more responsive status updates
+    const interval = setInterval(pollTaskStatus, 1000);
     return () => clearInterval(interval);
   }, [sessionId]);
 
@@ -635,7 +605,7 @@ export default function MessageView({
             <MessageSquare className="w-3.5 h-3.5 text-zinc-500" />
             <span className="text-[12px] font-medium text-zinc-300">Messages</span>
           </div>
-          <ActivityIndicator state={activityState} isConnected={isConnected} />
+          <StatusIndicator taskStatus={taskStatus} isConnected={isConnected} />
         </div>
 
         {/* Empty state with activity-aware messaging */}
@@ -689,7 +659,7 @@ export default function MessageView({
             {messages.length}{hasMoreMessages ? "+" : ""}
           </span>
         </div>
-        <ActivityIndicator state={activityState} isConnected={isConnected} />
+        <StatusIndicator taskStatus={taskStatus} isConnected={isConnected} />
       </div>
 
       {/* Messages list */}

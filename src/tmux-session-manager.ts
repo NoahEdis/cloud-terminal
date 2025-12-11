@@ -16,7 +16,8 @@ import type { IPty } from "node-pty";
 import type { WebSocket } from "ws";
 import * as tmux from "./tmux.js";
 import * as supabase from "./supabase.js";
-import type { ActivityState } from "./types.js";
+import type { ActivityState, TaskStatus } from "./types.js";
+import { updateTokenCount } from "./terminal-parser.js";
 
 const MAX_BUFFER_SIZE = 100_000; // ~2000 lines of 50 chars
 
@@ -85,6 +86,12 @@ export interface TmuxManagedSession {
   source: "cloud" | "local";
   // Metrics for context tracking
   metrics: SessionMetrics;
+  // Task status tracking for visual indicators
+  currentTool: string | null;
+  taskStartTime: Date | null;
+  toolUseCount: number;
+  tokenCount: number;
+  taskCompletedAt: Date | null;
 }
 
 export interface SessionMetrics {
@@ -123,6 +130,8 @@ export interface TmuxSessionInfo {
   activeWindowName?: string;
   // Metrics for context tracking
   metrics: SessionMetrics;
+  // Task status for visual indicators
+  taskStatus?: TaskStatus;
 }
 
 // Helper to create initial metrics
@@ -406,6 +415,12 @@ export class TmuxSessionManager {
           activityState: "idle",
           source: ts.name.startsWith(CLOUD_SESSION_PREFIX) ? "cloud" : "local",
           metrics: createInitialMetrics(),
+          // Task status tracking
+          currentTool: null,
+          taskStartTime: null,
+          toolUseCount: 0,
+          tokenCount: 0,
+          taskCompletedAt: null,
         });
         // Track the session_id -> name mapping
         this.sessionIdToName.set(ts.id, ts.name);
@@ -497,6 +512,12 @@ export class TmuxSessionManager {
       activityState: "idle",
       source: "cloud",
       metrics: createInitialMetrics(),
+      // Task status tracking
+      currentTool: null,
+      taskStartTime: null,
+      toolUseCount: 0,
+      tokenCount: 0,
+      taskCompletedAt: null,
     };
 
     this.sessions.set(name, session);
@@ -565,6 +586,14 @@ export class TmuxSessionManager {
       attached: s.tmuxSession?.attached || false,
       windows: s.tmuxSession?.windows || 1,
       metrics: s.metrics,
+      taskStatus: {
+        activityState: s.activityState,
+        currentTool: s.currentTool,
+        taskStartTime: s.taskStartTime?.toISOString() || null,
+        toolUseCount: s.toolUseCount,
+        tokenCount: s.tokenCount,
+        taskCompletedAt: s.taskCompletedAt?.toISOString() || null,
+      },
     }));
   }
 
@@ -801,6 +830,9 @@ export class TmuxSessionManager {
       // Update metrics
       updateMetrics(session.metrics, data, session.outputBuffer);
 
+      // Parse terminal output for token counts (supplementary to hooks)
+      session.tokenCount = updateTokenCount(session.tokenCount, data);
+
       // Broadcast to all connected clients
       const message = JSON.stringify({ type: "output", data });
       for (const client of session.clients) {
@@ -891,31 +923,101 @@ export class TmuxSessionManager {
 
   /**
    * Set activity state for a session (called by hooks).
+   * @param name - Session name
+   * @param state - New activity state
+   * @param hookEvent - Original hook event (for task lifecycle tracking)
+   * @param toolName - Tool name (for PreToolUse/PostToolUse)
    */
-  setActivityState(name: string, state: ActivityState): boolean {
+  setActivityState(
+    name: string,
+    state: ActivityState,
+    hookEvent?: string,
+    toolName?: string
+  ): boolean {
     const session = this.sessions.get(name);
     if (!session || session.status === "exited") return false;
 
-    session.activityState = state;
-    session.lastActivity = new Date();
+    const now = new Date();
+    const prevState = session.activityState;
 
-    // Broadcast to clients
-    const message = JSON.stringify({ type: "activity", state });
+    // Track task lifecycle based on hook events
+    if (hookEvent === "UserPromptSubmit") {
+      // New task starting - reset counters
+      session.taskStartTime = now;
+      session.toolUseCount = 0;
+      session.tokenCount = 0;
+      session.taskCompletedAt = null;
+      session.currentTool = null;
+    } else if (hookEvent === "PreToolUse" && toolName) {
+      // Tool starting
+      session.currentTool = toolName;
+      session.toolUseCount++;
+    } else if (hookEvent === "PostToolUse") {
+      // Tool finished - keep currentTool visible briefly, clear on next event
+    } else if (hookEvent === "Stop" || hookEvent === "Notification") {
+      // Task completed
+      if (prevState === "busy") {
+        session.taskCompletedAt = now;
+      }
+      session.currentTool = null;
+    }
+
+    session.activityState = state;
+    session.lastActivity = now;
+
+    // Build task status for broadcast
+    const taskStatus: TaskStatus = {
+      activityState: state,
+      currentTool: session.currentTool,
+      taskStartTime: session.taskStartTime?.toISOString() || null,
+      toolUseCount: session.toolUseCount,
+      tokenCount: session.tokenCount,
+      taskCompletedAt: session.taskCompletedAt?.toISOString() || null,
+    };
+
+    // Broadcast to clients with full task status
+    const message = JSON.stringify({ type: "activity", state, taskStatus });
     for (const client of session.clients) {
       if (client.readyState === 1) {
         client.send(message);
       }
     }
 
-    console.log(`[TmuxSessionManager] Session ${name} activity -> ${state}`);
+    console.log(
+      `[TmuxSessionManager] Session ${name} activity -> ${state}` +
+        (toolName ? ` (tool: ${toolName})` : "") +
+        (session.toolUseCount > 0 ? ` [${session.toolUseCount} tools]` : "")
+    );
 
     // Persist to Supabase
     supabase.updateSessionStatus(name, {
       activityState: state,
       lastActivity: session.lastActivity,
+      currentTool: session.currentTool,
+      taskStartTime: session.taskStartTime,
+      toolUseCount: session.toolUseCount,
+      tokenCount: session.tokenCount,
+      taskCompletedAt: session.taskCompletedAt,
     });
 
     return true;
+  }
+
+  /**
+   * Get task status for a session.
+   */
+  getTaskStatus(name: string): TaskStatus | null {
+    const session = this.sessions.get(name);
+    if (!session) return null;
+
+    return {
+      activityState: session.activityState,
+      currentTool: session.currentTool,
+      taskStartTime: session.taskStartTime?.toISOString() || null,
+      toolUseCount: session.toolUseCount,
+      tokenCount: session.tokenCount,
+      taskCompletedAt: session.taskCompletedAt?.toISOString() || null,
+    };
   }
 
   /**

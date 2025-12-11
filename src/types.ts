@@ -25,6 +25,16 @@ export type HookEvent =
   | "Stop"              // Claude finished responding -> idle
   | "SessionEnd";       // Session terminated -> exited
 
+// Task status for rich visual indicators
+export interface TaskStatus {
+  activityState: ActivityState;
+  currentTool: string | null;
+  taskStartTime: string | null;  // ISO timestamp
+  toolUseCount: number;
+  tokenCount: number;
+  taskCompletedAt: string | null;  // ISO timestamp
+}
+
 export interface Session {
   id: string;
   pty: IPty;
@@ -44,6 +54,12 @@ export interface Session {
   activityState: ActivityState;
   // When true, activity state is controlled by Claude Code hooks instead of prompt detection
   externallyControlled: boolean;
+  // Task status tracking for visual indicators
+  currentTool: string | null;
+  taskStartTime: Date | null;
+  toolUseCount: number;
+  tokenCount: number;
+  taskCompletedAt: Date | null;
 }
 
 export interface SessionInfo {
@@ -59,6 +75,7 @@ export interface SessionInfo {
   exitCode?: number;
   clientCount: number;
   activityState: ActivityState;
+  taskStatus?: TaskStatus;
 }
 
 // WebSocket message types
@@ -72,4 +89,5 @@ export type ServerMessage =
   | { type: "history"; data: string }
   | { type: "exit"; code: number }
   | { type: "error"; message: string }
-  | { type: "ping"; timestamp: number };
+  | { type: "ping"; timestamp: number }
+  | { type: "activity"; state: ActivityState; taskStatus?: TaskStatus };

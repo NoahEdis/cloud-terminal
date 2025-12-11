@@ -150,6 +150,12 @@ export async function updateSessionStatus(
     externallyControlled?: boolean;
     lastActivity?: Date;
     lastOutputTime?: Date;
+    // Task status fields
+    currentTool?: string | null;
+    taskStartTime?: Date | null;
+    toolUseCount?: number;
+    tokenCount?: number;
+    taskCompletedAt?: Date | null;
   }
 ): Promise<void> {
   if (!isSupabaseEnabled()) return;
@@ -162,6 +168,12 @@ export async function updateSessionStatus(
     if (updates.externallyControlled !== undefined) body.externally_controlled = updates.externallyControlled;
     if (updates.lastActivity !== undefined) body.last_activity = updates.lastActivity.toISOString();
     if (updates.lastOutputTime !== undefined) body.last_output_time = updates.lastOutputTime.toISOString();
+    // Task status fields
+    if (updates.currentTool !== undefined) body.current_tool = updates.currentTool;
+    if (updates.taskStartTime !== undefined) body.task_start_time = updates.taskStartTime?.toISOString() || null;
+    if (updates.toolUseCount !== undefined) body.tool_use_count = updates.toolUseCount;
+    if (updates.tokenCount !== undefined) body.token_count = updates.tokenCount;
+    if (updates.taskCompletedAt !== undefined) body.task_completed_at = updates.taskCompletedAt?.toISOString() || null;
 
     await supabaseRequest("PATCH", "/terminal_sessions", {
       searchParams: { id: `eq.${sessionId}` },
