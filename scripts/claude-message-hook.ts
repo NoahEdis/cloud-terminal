@@ -148,10 +148,13 @@ function getTmuxSessionName(): string | null {
 
 // Get session ID for storing messages
 // Priority:
-// 1) tmux session name (if running inside tmux)
+// 1) tmux session name (if running inside tmux) - DEFINITIVE match
 // 2) Existing session with matching claude_session_id in metadata
-// 3) Existing session with matching CWD
+// 3) Existing session with Claude session ID as its ID
 // 4) Create new session with Claude session ID (fallback)
+//
+// NOTE: CWD-based matching is intentionally DISABLED to prevent cross-session
+// message contamination when multiple Claude instances run in the same directory.
 async function getSessionId(claudeSessionId: string, cwd?: string): Promise<string | null> {
   const tmuxSessionName = getTmuxSessionName();
 
@@ -243,45 +246,17 @@ async function getSessionId(claudeSessionId: string, cwd?: string): Promise<stri
     return existingById.id;
   }
 
-  // Strategy 3: Find a session by matching CWD that doesn't already have a different claude_session_id
-  // This prevents cross-contamination when multiple Claude instances run in the same directory
-  if (cwd) {
-    const normalizedCwd = cwd.replace(/\/+$/, "");
-    const { data: byCwd } = await supabase
-      .from("terminal_sessions")
-      .select("id, metadata, cwd")
-      .eq("cwd", normalizedCwd)
-      .eq("status", "running")
-      .order("last_activity", { ascending: false })
-      .limit(5);  // Get multiple to check
-
-    if (byCwd && byCwd.length > 0) {
-      // Find a session that either has no claude_session_id, or has matching claude_session_id
-      for (const session of byCwd) {
-        const metadata = (session.metadata as Record<string, unknown>) || {};
-        const existingClaudeId = metadata.claude_session_id as string | undefined;
-
-        // Skip sessions that already have a DIFFERENT Claude session ID
-        if (existingClaudeId && existingClaudeId !== claudeSessionId) {
-          console.log(`[MessageHook] Skipping session ${session.id} - already has different Claude ID`);
-          continue;
-        }
-
-        // Found a suitable session - associate the Claude session ID with it
-        if (!existingClaudeId) {
-          await supabase
-            .from("terminal_sessions")
-            .update({
-              metadata: { ...metadata, claude_session_id: claudeSessionId },
-            })
-            .eq("id", session.id);
-          console.log(`[MessageHook] Associated Claude session ${claudeSessionId.slice(0, 8)}... with CWD-matched session ${session.id}`);
-        }
-        console.log(`[MessageHook] Found session by CWD: ${session.id}`);
-        return session.id;
-      }
-    }
-  }
+  // Strategy 3: DISABLED - CWD-based matching is unreliable
+  // When multiple Claude instances run in the same directory, CWD matching causes
+  // messages from different Claude sessions to get mixed together.
+  // Instead, we now ONLY use:
+  //   1. Tmux session name (definitive match)
+  //   2. Exact claude_session_id match in metadata
+  //   3. Exact session ID match
+  //   4. Create a new session (fallback)
+  //
+  // This ensures each Claude Code instance gets its own message stream.
+  console.log(`[MessageHook] No tmux session and no existing match for Claude ID ${claudeSessionId.slice(0, 8)}...`);
 
   // Fallback: Create new session with Claude session ID
   console.log(`[MessageHook] Creating new session with Claude ID: ${claudeSessionId.slice(0, 8)}...`);
