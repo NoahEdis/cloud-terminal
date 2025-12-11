@@ -17,7 +17,7 @@ LOG_FILE="/tmp/claude-hook.log"
 echo "$(date): Hook called with args: $@" >> "$LOG_FILE"
 
 # Configuration - default to localhost since hooks run on the same machine as server
-API_URL="${CLOUD_TERMINAL_API_URL:-http://localhost:3001}"
+API_URL="${CLOUD_TERMINAL_API_URL:-http://localhost:31337}"
 API_KEY="${CLOUD_TERMINAL_API_KEY:-}"
 
 # Get event type from first argument

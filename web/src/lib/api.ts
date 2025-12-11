@@ -147,7 +147,7 @@ const getApiUrl = () => {
       url = process.env.NEXT_PUBLIC_TERMINAL_API_URL || "http://localhost:31337";
     }
   } else {
-    url = process.env.NEXT_PUBLIC_TERMINAL_API_URL || "http://localhost:3001";
+    url = process.env.NEXT_PUBLIC_TERMINAL_API_URL || "http://localhost:31337";
   }
   // Remove trailing slash to prevent double-slash in URL construction
   return url.replace(/\/+$/, "");
