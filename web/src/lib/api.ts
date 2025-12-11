@@ -674,18 +674,21 @@ async function supabaseRequest<T>(
 
 /**
  * Fetch structured messages for a chat.
+ * Supports pagination with beforeSeq for loading older messages.
  */
 export async function getChatMessages(
   chatId: string,
   options: {
     limit?: number;
     afterSeq?: number;
+    beforeSeq?: number;
     messageTypes?: string[];
+    order?: "asc" | "desc";
   } = {}
 ): Promise<ClaudeCodeMessage[]> {
   const searchParams: Record<string, string> = {
     session_id: `eq.${chatId}`,
-    order: "seq.asc",
+    order: `seq.${options.order || "asc"}`,
   };
 
   if (options.limit) {
@@ -694,6 +697,15 @@ export async function getChatMessages(
 
   if (options.afterSeq !== undefined) {
     searchParams.seq = `gt.${options.afterSeq}`;
+  }
+
+  if (options.beforeSeq !== undefined) {
+    // If both afterSeq and beforeSeq, use and() syntax
+    if (options.afterSeq !== undefined) {
+      searchParams.seq = `and(gt.${options.afterSeq},lt.${options.beforeSeq})`;
+    } else {
+      searchParams.seq = `lt.${options.beforeSeq}`;
+    }
   }
 
   if (options.messageTypes && options.messageTypes.length > 0) {

@@ -20,6 +20,8 @@ import {
   Square,
   WifiOff,
   Phone,
+  Copy,
+  Check,
 } from "lucide-react";
 import {
   listSessions,
@@ -75,6 +77,7 @@ export default function Home() {
   const [messageCount, setMessageCount] = useState<number>(0);
   const [voiceChatOpen, setVoiceChatOpen] = useState(false);
   const [windowInfo, setWindowInfo] = useState<WindowInfoResponse | null>(null);
+  const [copiedSessionId, setCopiedSessionId] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -344,6 +347,17 @@ export default function Home() {
     }
   }, [isRecording]);
 
+  const copySessionId = useCallback(async () => {
+    if (!selectedSessionId) return;
+    try {
+      await navigator.clipboard.writeText(selectedSessionId);
+      setCopiedSessionId(true);
+      setTimeout(() => setCopiedSessionId(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy session ID:", err);
+    }
+  }, [selectedSessionId]);
+
   const currentSession = sessions.find(s => getSessionId(s) === selectedSessionId);
 
   return (
@@ -412,6 +426,24 @@ export default function Home() {
                 </span>
               )}
             </>
+          )}
+
+          {/* Session ID with copy button - shown when a session is selected */}
+          {selectedSessionId && (
+            <button
+              onClick={copySessionId}
+              className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-900/50 border border-zinc-800/50 hover:bg-zinc-800/50 hover:border-zinc-700/50 transition-colors group"
+              title={`Session ID: ${selectedSessionId}\nClick to copy`}
+            >
+              <span className="text-[10px] text-zinc-500 font-mono truncate max-w-24">
+                {selectedSessionId.length > 12 ? selectedSessionId.slice(0, 12) + "..." : selectedSessionId}
+              </span>
+              {copiedSessionId ? (
+                <Check className="w-3 h-3 text-emerald-500" />
+              ) : (
+                <Copy className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300" />
+              )}
+            </button>
           )}
 
           {/* Connection status indicator */}
@@ -709,7 +741,7 @@ export default function Home() {
 
       {/* Version indicator */}
       <div className="fixed bottom-2 left-2 px-2 py-1 rounded bg-zinc-900/80 border border-zinc-800/50 text-[10px] text-zinc-600 font-mono z-50">
-        v0.2.8
+        v0.2.9
       </div>
     </div>
   );

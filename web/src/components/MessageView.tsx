@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useLayoutEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -22,11 +22,16 @@ import {
   Check,
   CornerDownRight,
   Circle,
+  ChevronsUp,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import type { ClaudeCodeMessage, MessageType, QuestionOption } from "@/lib/message-types";
 import type { ActivityState } from "@/lib/types";
 import { getSessionMessages, answerQuestion, subscribeToMessages, getChat } from "@/lib/api";
+
+// Number of messages to load initially and per page
+const INITIAL_MESSAGE_COUNT = 50;
+const LOAD_MORE_COUNT = 30;
 
 interface MessageViewProps {
   sessionId: string;
@@ -411,21 +416,44 @@ export default function MessageView({
 }: MessageViewProps) {
   const [messages, setMessages] = useState<ClaudeCodeMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activityState, setActivityState] = useState<ActivityState | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const [userHasScrolled, setUserHasScrolled] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const lowestSeqRef = useRef<number | null>(null);
 
-  // Load initial messages and session state
+  // Load initial messages (most recent) and session state
   useEffect(() => {
     async function loadMessages() {
       setIsLoading(true);
       setError(null);
       setInitialLoadComplete(false);
+      setHasMoreMessages(false);
+      lowestSeqRef.current = null;
+      setUserHasScrolled(false);
+
       try {
-        const initialMessages = await getSessionMessages(sessionId);
-        setMessages(initialMessages);
+        // Load the most recent messages first (descending order)
+        const recentMessages = await getSessionMessages(sessionId, {
+          limit: INITIAL_MESSAGE_COUNT,
+          order: "desc",
+        });
+
+        // Reverse to get ascending order for display
+        const sortedMessages = recentMessages.reverse();
+        setMessages(sortedMessages);
+
+        // Track the lowest seq we have for loading more
+        if (sortedMessages.length > 0) {
+          lowestSeqRef.current = sortedMessages[0].seq;
+          // If we got the full limit, there might be more messages
+          setHasMoreMessages(recentMessages.length >= INITIAL_MESSAGE_COUNT);
+        }
 
         // Also fetch session info to get activity state
         try {
@@ -440,13 +468,80 @@ export default function MessageView({
         setError(err instanceof Error ? err.message : "Failed to load messages");
       } finally {
         setIsLoading(false);
-        // Mark initial load complete after a small delay to allow render
-        setTimeout(() => setInitialLoadComplete(true), 100);
       }
     }
 
     loadMessages();
   }, [sessionId]);
+
+  // Use layout effect to scroll to bottom immediately after render, before paint
+  useLayoutEffect(() => {
+    if (!isLoading && messages.length > 0 && !initialLoadComplete && messagesContainerRef.current) {
+      // Scroll to bottom immediately without animation
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+      // Mark initial load complete after scroll
+      setInitialLoadComplete(true);
+    }
+  }, [isLoading, messages.length, initialLoadComplete]);
+
+  // Load more (older) messages
+  const loadMoreMessages = useCallback(async () => {
+    if (isLoadingMore || !hasMoreMessages || lowestSeqRef.current === null) return;
+
+    setIsLoadingMore(true);
+    try {
+      const olderMessages = await getSessionMessages(sessionId, {
+        limit: LOAD_MORE_COUNT,
+        beforeSeq: lowestSeqRef.current,
+        order: "desc",
+      });
+
+      if (olderMessages.length > 0) {
+        const sortedOlder = olderMessages.reverse();
+        lowestSeqRef.current = sortedOlder[0].seq;
+
+        // Preserve scroll position when prepending messages
+        const container = messagesContainerRef.current;
+        const previousScrollHeight = container?.scrollHeight || 0;
+
+        setMessages(prev => [...sortedOlder, ...prev]);
+
+        // After state update, restore scroll position
+        requestAnimationFrame(() => {
+          if (container) {
+            const newScrollHeight = container.scrollHeight;
+            container.scrollTop = newScrollHeight - previousScrollHeight;
+          }
+        });
+
+        setHasMoreMessages(olderMessages.length >= LOAD_MORE_COUNT);
+      } else {
+        setHasMoreMessages(false);
+      }
+    } catch (err) {
+      console.error("Failed to load more messages:", err);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [sessionId, isLoadingMore, hasMoreMessages]);
+
+  // Handle scroll events for auto-loading more
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const container = e.currentTarget;
+    const { scrollTop, scrollHeight, clientHeight } = container;
+
+    // Mark that user has scrolled (for auto-scroll behavior)
+    if (scrollTop < scrollHeight - clientHeight - 50) {
+      setUserHasScrolled(true);
+    } else {
+      setUserHasScrolled(false);
+    }
+
+    // Load more when scrolled near the top
+    if (scrollTop < 100 && hasMoreMessages && !isLoadingMore) {
+      loadMoreMessages();
+    }
+  }, [hasMoreMessages, isLoadingMore, loadMoreMessages]);
 
   // Poll for session activity state changes
   useEffect(() => {
@@ -482,14 +577,12 @@ export default function MessageView({
     return unsubscribe;
   }, [sessionId]);
 
-  // Auto-scroll to bottom
-  // Use instant scroll on initial load to avoid visible scrolling, smooth for updates
+  // Auto-scroll to bottom for new messages (only if user hasn't scrolled up)
   useEffect(() => {
-    if (autoScroll && messagesEndRef.current) {
-      const behavior = initialLoadComplete ? "smooth" : "instant";
-      messagesEndRef.current.scrollIntoView({ behavior });
+    if (autoScroll && initialLoadComplete && !userHasScrolled && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, autoScroll, initialLoadComplete]);
+  }, [messages, autoScroll, initialLoadComplete, userHasScrolled]);
 
   // Handle answering a question
   const handleAnswer = useCallback(async (messageId: string, response: string) => {
@@ -593,14 +686,38 @@ export default function MessageView({
           <MessageSquare className="w-3.5 h-3.5 text-zinc-500" />
           <span className="text-[12px] font-medium text-zinc-300">Messages</span>
           <span className="text-[10px] px-1.5 py-0 rounded bg-zinc-800 text-zinc-500">
-            {messages.length}
+            {messages.length}{hasMoreMessages ? "+" : ""}
           </span>
         </div>
         <ActivityIndicator state={activityState} isConnected={isConnected} />
       </div>
 
       {/* Messages list */}
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
+      <div
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5"
+        onScroll={handleScroll}
+      >
+        {/* Load more indicator */}
+        {hasMoreMessages && (
+          <div className="flex justify-center py-2">
+            {isLoadingMore ? (
+              <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Loading older messages...
+              </div>
+            ) : (
+              <button
+                onClick={loadMoreMessages}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 bg-zinc-900/50 hover:bg-zinc-800/50 rounded border border-zinc-800 transition-colors"
+              >
+                <ChevronsUp className="w-3 h-3" />
+                Load older messages
+              </button>
+            )}
+          </div>
+        )}
+
         {messages.map((message) => (
           <MessageCard
             key={message.id}
