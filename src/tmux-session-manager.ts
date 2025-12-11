@@ -30,8 +30,12 @@ function recordEvent(
 
 const MAX_BUFFER_SIZE = 100_000; // ~2000 lines of 50 chars
 
-// Session prefix for cloud-created sessions
-const CLOUD_SESSION_PREFIX = "cloud-";
+// Unified session group name - all sessions (web and local) join this group
+// This enables Ctrl+B P to cycle through all sessions seamlessly
+const UNIFIED_SESSION_GROUP = "cloud-terminal";
+
+// Session prefix for new sessions created via the cloud UI
+const CLOUD_SESSION_PREFIX = "terminal-";
 
 /**
  * Clean malformed escape sequences from terminal output.
@@ -225,6 +229,11 @@ function filterTerminalResponses(data: string): string {
   return filtered;
 }
 
+// Configuration for PTY reconnection
+const PTY_RECONNECT_MAX_ATTEMPTS = 5;
+const PTY_RECONNECT_BASE_DELAY = 1000; // 1 second
+const PTY_RECONNECT_MAX_DELAY = 30000; // 30 seconds
+
 export class TmuxSessionManager {
   private sessions = new Map<string, TmuxManagedSession>();
   // Track session_id -> name mapping to detect renames
@@ -232,12 +241,16 @@ export class TmuxSessionManager {
   private syncInterval: NodeJS.Timeout | null = null;
   private cleanupInterval: NodeJS.Timeout | null = null;
   private tmuxAvailable = false;
-  // Track logged deduplication fingerprints to avoid repeated logs
-  private loggedDeduplicationFingerprints = new Map<string, string>(); // fingerprint -> kept session name
+  // The base session name for the unified group (first session in the group)
+  private baseSessionName: string | null = null;
+  // Track reconnection attempts per session
+  private reconnectAttempts = new Map<string, number>();
+  // Track reconnection timeouts to allow cancellation
+  private reconnectTimeouts = new Map<string, NodeJS.Timeout>();
 
   /**
    * Initialize the session manager.
-   * Checks for tmux and syncs existing sessions.
+   * Checks for tmux, ensures base session group exists, and syncs sessions.
    */
   async init(): Promise<void> {
     this.tmuxAvailable = await tmux.isTmuxAvailable();
@@ -249,6 +262,9 @@ export class TmuxSessionManager {
 
     console.log("[TmuxSessionManager] tmux is available, syncing sessions...");
 
+    // Find or create the base session for the unified group
+    await this.ensureBaseSession();
+
     // Initial sync of existing tmux sessions
     await this.syncTmuxSessions();
 
@@ -258,109 +274,71 @@ export class TmuxSessionManager {
     // Clean up dead connections every minute
     this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
 
-    console.log(`[TmuxSessionManager] Initialized with ${this.sessions.size} sessions`);
+    console.log(`[TmuxSessionManager] Initialized with ${this.sessions.size} sessions (group: ${this.baseSessionName})`);
   }
 
   /**
-   * Deduplicate sessions that share the same panes (linked windows).
-   * When multiple sessions share the same pane PIDs, keep only one:
-   * - Prefer attached sessions
-   * - Otherwise prefer the oldest session (by creation time)
-   * - Otherwise prefer the session we're already tracking
+   * Ensure the base session for the unified group exists.
+   * Priority:
+   * 1. Find an existing session already in the unified group
+   * 2. Find ANY existing grouped session and use its group (join existing local sessions)
+   * 3. Create a new base session if no groups exist
    */
-  private async deduplicateSessions(sessions: tmux.TmuxSession[]): Promise<tmux.TmuxSession[]> {
-    if (sessions.length <= 1) return sessions;
+  private async ensureBaseSession(): Promise<void> {
+    const sessions = await tmux.listSessions();
 
-    // Group sessions by their pane fingerprint (sorted PIDs)
-    const fingerprintToSessions = new Map<string, tmux.TmuxSession[]>();
-    // Sessions with no fingerprint (empty panes or error) - include separately
-    const noFingerprintSessions: tmux.TmuxSession[] = [];
-
+    // Priority 1: Check if any session is already in the unified group
     for (const session of sessions) {
-      const fingerprint = await tmux.getSessionPaneFingerprint(session.name);
-      if (!fingerprint) {
-        // Session has no panes yet (race condition) or command failed - include it anyway
-        noFingerprintSessions.push(session);
-        continue;
+      const group = await tmux.getSessionGroup(session.name);
+      if (group === UNIFIED_SESSION_GROUP) {
+        this.baseSessionName = session.name;
+        console.log(`[TmuxSessionManager] Found existing base session in unified group: ${session.name}`);
+        return;
       }
-
-      const group = fingerprintToSessions.get(fingerprint) || [];
-      group.push(session);
-      fingerprintToSessions.set(fingerprint, group);
     }
 
-    // For each group, pick the best session
-    const result: tmux.TmuxSession[] = [];
-
-    for (const [fingerprint, group] of fingerprintToSessions) {
-      if (group.length === 1) {
-        result.push(group[0]);
-        continue;
-      }
-
-      // Multiple sessions share the same panes - pick the best one
-      // Priority: attached > already tracked > oldest
-      let best = group[0];
-
-      for (const session of group) {
-        // Prefer attached sessions
-        if (session.attached && !best.attached) {
-          best = session;
-          continue;
-        }
-        if (!session.attached && best.attached) {
-          continue;
-        }
-
-        // Prefer sessions we're already tracking
-        const sessionTracked = this.sessions.has(session.name);
-        const bestTracked = this.sessions.has(best.name);
-        if (sessionTracked && !bestTracked) {
-          best = session;
-          continue;
-        }
-        if (!sessionTracked && bestTracked) {
-          continue;
-        }
-
-        // Prefer oldest session
-        if (session.created < best.created) {
-          best = session;
-        }
-      }
-
-      // Log deduplication only if this is new or changed
-      const duplicates = group.filter(s => s.name !== best.name).map(s => s.name);
-      if (duplicates.length > 0) {
-        const previousBest = this.loggedDeduplicationFingerprints.get(fingerprint);
-        if (previousBest !== best.name) {
-          console.log(`[TmuxSessionManager] Deduplicating sessions with shared panes. Keeping: ${best.name}, hiding: ${duplicates.join(", ")}`);
-          this.loggedDeduplicationFingerprints.set(fingerprint, best.name);
-        }
-      } else {
-        // No longer a duplicate group - clean up tracking
-        this.loggedDeduplicationFingerprints.delete(fingerprint);
-      }
-
-      result.push(best);
+    // Priority 2: Check if the unified session group base exists directly
+    if (await tmux.sessionExists(UNIFIED_SESSION_GROUP)) {
+      this.baseSessionName = UNIFIED_SESSION_GROUP;
+      console.log(`[TmuxSessionManager] Using existing session as base: ${UNIFIED_SESSION_GROUP}`);
+      return;
     }
 
-    // Include sessions that had no fingerprint (couldn't deduplicate them)
-    result.push(...noFingerprintSessions);
+    // Priority 3: Find ANY existing grouped session and join that group
+    // This allows cloud-terminal to seamlessly join existing local session groups
+    for (const session of sessions) {
+      const group = await tmux.getSessionGroup(session.name);
+      if (group) {
+        // Found an existing group - use its first session as our base
+        this.baseSessionName = session.name;
+        console.log(`[TmuxSessionManager] Joining existing session group: ${group} (base: ${session.name})`);
+        return;
+      }
+    }
 
-    return result;
+    // Priority 4: No groups exist - create the base session
+    // This base session defines the window layout that all grouped sessions share
+    console.log(`[TmuxSessionManager] No existing groups found, creating base session: ${UNIFIED_SESSION_GROUP}`);
+    await tmux.createSession({
+      name: UNIFIED_SESSION_GROUP,
+      cwd: process.env.HOME || "/",
+    });
+    this.baseSessionName = UNIFIED_SESSION_GROUP;
+  }
+
+  /**
+   * Get the base session name for the unified group.
+   */
+  getBaseSessionName(): string | null {
+    return this.baseSessionName;
   }
 
   /**
    * Sync with tmux to discover new/removed/renamed sessions.
-   * Includes deduplication to filter out sessions with shared/linked windows.
+   * All sessions in the unified group are shown (no deduplication needed).
    */
   async syncTmuxSessions(): Promise<void> {
-    const allTmuxSessions = await tmux.listSessions();
-
-    // Deduplicate sessions with shared panes (linked windows)
-    // Sessions that share the same pane PIDs are duplicates
-    const tmuxSessions = await this.deduplicateSessions(allTmuxSessions);
+    const tmuxSessions = await tmux.listSessions();
 
     const tmuxNames = new Set(tmuxSessions.map(s => s.name));
     const tmuxIds = new Set(tmuxSessions.map(s => s.id));
@@ -405,7 +383,16 @@ export class TmuxSessionManager {
     // Add new sessions discovered from tmux
     for (const ts of tmuxSessions) {
       if (!this.sessions.has(ts.name)) {
-        console.log(`[TmuxSessionManager] Discovered new tmux session: ${ts.name}`);
+        // Check the session's group status
+        const group = await tmux.getSessionGroup(ts.name);
+        const groupInfo = group ? ` (group: ${group})` : " (ungrouped)";
+        console.log(`[TmuxSessionManager] Discovered new tmux session: ${ts.name}${groupInfo}`);
+
+        // Log if session is not in the unified group (for debugging visibility issues)
+        if (!group && this.baseSessionName) {
+          console.log(`[TmuxSessionManager] Note: ${ts.name} is not grouped with ${this.baseSessionName}. Sessions created locally won't share windows, but will still appear in the session list.`);
+        }
+
         this.sessions.set(ts.name, {
           name: ts.name,
           pty: null, // No PTY until a client connects
@@ -480,7 +467,8 @@ export class TmuxSessionManager {
   }
 
   /**
-   * Create a new tmux session.
+   * Create a new tmux session in the unified group.
+   * All sessions share the same windows and can be cycled with Ctrl+B P.
    */
   async create(config: {
     name?: string;
@@ -500,8 +488,20 @@ export class TmuxSessionManager {
       throw new Error(`Session '${name}' already exists`);
     }
 
-    // Create tmux session
-    await tmux.createSession({ name, cwd, width: cols, height: rows });
+    // Ensure base session exists before creating grouped session
+    if (!this.baseSessionName) {
+      await this.ensureBaseSession();
+    }
+
+    // Create tmux session as part of the unified group
+    // This allows Ctrl+B P to cycle through all sessions (web and local)
+    await tmux.createSession({
+      name,
+      cwd,
+      width: cols,
+      height: rows,
+      groupWith: this.baseSessionName || undefined,
+    });
 
     const tmuxSession = await tmux.getSession(name);
 
@@ -817,8 +817,16 @@ export class TmuxSessionManager {
 
   /**
    * Attach a PTY to a tmux session for streaming output.
+   * Includes automatic reconnection if the PTY disconnects but the tmux session still exists.
    */
   private async attachPty(session: TmuxManagedSession): Promise<void> {
+    // Cancel any pending reconnection for this session
+    const existingTimeout = this.reconnectTimeouts.get(session.name);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      this.reconnectTimeouts.delete(session.name);
+    }
+
     // Use node-pty to attach to the tmux session
     const ptyProcess = pty.spawn("tmux", ["attach-session", "-t", session.name], {
       name: "xterm-256color",
@@ -829,6 +837,9 @@ export class TmuxSessionManager {
     });
 
     session.pty = ptyProcess;
+
+    // Reset reconnection attempts on successful attach
+    this.reconnectAttempts.set(session.name, 0);
 
     // Handle PTY output
     ptyProcess.onData((rawData: string) => {
@@ -870,8 +881,9 @@ export class TmuxSessionManager {
       session.pty = null;
 
       // Check if the tmux session still exists
-      tmux.sessionExists(session.name).then(exists => {
+      tmux.sessionExists(session.name).then(async (exists) => {
         if (!exists) {
+          // Session is truly gone - mark as exited
           session.status = "exited";
           session.activityState = "exited";
 
@@ -891,11 +903,114 @@ export class TmuxSessionManager {
             activityState: "exited",
             lastActivity: new Date(),
           });
+
+          // Clean up reconnection tracking
+          this.reconnectAttempts.delete(session.name);
+          this.reconnectTimeouts.delete(session.name);
+        } else if (session.clients.size > 0) {
+          // Session still exists and we have connected clients - attempt reconnection
+          await this.attemptPtyReconnect(session);
+        } else {
+          // Session exists but no clients - just log it
+          console.log(`[TmuxSessionManager] PTY detached for ${session.name}, no clients connected`);
         }
       });
     });
 
     console.log(`[TmuxSessionManager] Attached PTY to session: ${session.name}`);
+  }
+
+  /**
+   * Attempt to reconnect the PTY to a tmux session.
+   * Uses exponential backoff for retry delays.
+   */
+  private async attemptPtyReconnect(session: TmuxManagedSession): Promise<void> {
+    const attempts = this.reconnectAttempts.get(session.name) || 0;
+
+    if (attempts >= PTY_RECONNECT_MAX_ATTEMPTS) {
+      console.log(`[TmuxSessionManager] Max reconnection attempts reached for ${session.name}`);
+
+      // Notify clients about the connection issue
+      const message = JSON.stringify({
+        type: "error",
+        message: "Lost connection to terminal. Please refresh to reconnect.",
+      });
+      for (const client of session.clients) {
+        if (client.readyState === 1) {
+          client.send(message);
+        }
+      }
+
+      // Reset attempts so manual refresh can try again
+      this.reconnectAttempts.set(session.name, 0);
+      return;
+    }
+
+    // Calculate delay with exponential backoff
+    const delay = Math.min(
+      PTY_RECONNECT_BASE_DELAY * Math.pow(2, attempts),
+      PTY_RECONNECT_MAX_DELAY
+    );
+
+    console.log(
+      `[TmuxSessionManager] Scheduling PTY reconnect for ${session.name} in ${delay}ms (attempt ${attempts + 1}/${PTY_RECONNECT_MAX_ATTEMPTS})`
+    );
+
+    // Notify clients about reconnection attempt
+    const reconnectMsg = JSON.stringify({
+      type: "output",
+      data: `\r\n\x1b[33mReconnecting to terminal (attempt ${attempts + 1}/${PTY_RECONNECT_MAX_ATTEMPTS})...\x1b[0m\r\n`,
+    });
+    for (const client of session.clients) {
+      if (client.readyState === 1) {
+        client.send(reconnectMsg);
+      }
+    }
+
+    this.reconnectAttempts.set(session.name, attempts + 1);
+
+    // Schedule reconnection
+    const timeout = setTimeout(async () => {
+      this.reconnectTimeouts.delete(session.name);
+
+      // Check if session still exists and has clients
+      const stillExists = await tmux.sessionExists(session.name);
+      if (!stillExists) {
+        console.log(`[TmuxSessionManager] Session ${session.name} no longer exists, aborting reconnect`);
+        return;
+      }
+
+      if (session.clients.size === 0) {
+        console.log(`[TmuxSessionManager] No clients for ${session.name}, aborting reconnect`);
+        return;
+      }
+
+      if (session.pty) {
+        console.log(`[TmuxSessionManager] PTY already attached for ${session.name}, skipping reconnect`);
+        return;
+      }
+
+      try {
+        await this.attachPty(session);
+
+        // Notify clients of successful reconnection
+        const successMsg = JSON.stringify({
+          type: "output",
+          data: `\x1b[32mReconnected to terminal\x1b[0m\r\n`,
+        });
+        for (const client of session.clients) {
+          if (client.readyState === 1) {
+            client.send(successMsg);
+          }
+        }
+      } catch (err) {
+        console.error(`[TmuxSessionManager] Failed to reconnect PTY for ${session.name}:`, err);
+        // Try again
+        await this.attemptPtyReconnect(session);
+      }
+    }, delay);
+
+    this.reconnectTimeouts.set(session.name, timeout);
   }
 
   /**
@@ -927,6 +1042,13 @@ export class TmuxSessionManager {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
     }
+
+    // Cancel all pending reconnection timeouts
+    for (const timeout of this.reconnectTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this.reconnectTimeouts.clear();
+    this.reconnectAttempts.clear();
 
     // Kill all PTY attachments (but not the tmux sessions themselves)
     for (const session of this.sessions.values()) {

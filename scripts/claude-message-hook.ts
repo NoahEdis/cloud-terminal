@@ -549,7 +549,7 @@ function getRecentAssistantOutput(transcriptPath: string, maxLines = 50): string
       const entry: TranscriptEntry = JSON.parse(line);
       if (entry.type === "assistant" && entry.message?.content) {
         for (const block of entry.message.content) {
-          if (typeof block === "object" && "text" in block) {
+          if (block && typeof block === "object" && "text" in block) {
             textBlocks.unshift((block as { text: string }).text);
           }
         }

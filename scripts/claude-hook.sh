@@ -80,7 +80,14 @@ curl "${CURL_ARGS[@]}" > /dev/null 2>&1 &
 SCRIPT_DIR="$(dirname "$0")"
 if [ "$EVENT_TYPE" = "PreToolUse" ] || [ "$EVENT_TYPE" = "PostToolUse" ] || [ "$EVENT_TYPE" = "UserPromptSubmit" ] || [ "$EVENT_TYPE" = "Stop" ] || [ "$EVENT_TYPE" = "Notification" ]; then
   # Pass the full hook context to the message hook
-  echo "$HOOK_CONTEXT" | npx tsx "$SCRIPT_DIR/claude-message-hook.ts" > /dev/null 2>&1 &
+  # Use compiled JS for faster startup (avoids npx tsx overhead on every hook)
+  COMPILED_HOOK="$SCRIPT_DIR/dist/claude-message-hook.js"
+  if [ -f "$COMPILED_HOOK" ]; then
+    echo "$HOOK_CONTEXT" | node "$COMPILED_HOOK" > /dev/null 2>&1 &
+  else
+    # Fallback to tsx if compiled version not available
+    echo "$HOOK_CONTEXT" | npx tsx "$SCRIPT_DIR/claude-message-hook.ts" > /dev/null 2>&1 &
+  fi
 fi
 
 # Exit successfully - we don't want hook failures to block Claude Code

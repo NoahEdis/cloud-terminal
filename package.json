@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && npm run build:hooks",
+    "build:hooks": "tsc --project scripts/tsconfig.json",
     "start": "node dist/index.js",
     "lint": "tsc --noEmit"
   },
