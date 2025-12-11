@@ -16,6 +16,7 @@ import type { IPty } from "node-pty";
 import type { WebSocket } from "ws";
 import * as tmux from "./tmux.js";
 import * as supabase from "./supabase.js";
+import { insertSystemMessageAsync } from "./supabase.js";
 import type { ActivityState, TaskStatus, SessionEventType } from "./types.js";
 import { updateTokenCount } from "./terminal-parser.js";
 
@@ -558,6 +559,15 @@ export class TmuxSessionManager {
       // Send the command
       tmux.sendKeys(name, config.autoRunCommand + "\n", true);
       console.log(`[TmuxSessionManager] Auto-ran command in ${name}: ${config.autoRunCommand}`);
+
+      // If this is a Claude Code session, insert a startup message
+      if (config.autoRunCommand.includes("claude")) {
+        insertSystemMessageAsync(
+          name,
+          `**Claude Code** session started\n\nWorking directory: \`${cwd}\``,
+          { chatType: config.chatType || "claude", autoRunCommand: config.autoRunCommand }
+        );
+      }
     }
 
     return session;

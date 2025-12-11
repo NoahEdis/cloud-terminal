@@ -23,6 +23,7 @@ import {
   CornerDownRight,
   Circle,
   ChevronsUp,
+  Info,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import type { ClaudeCodeMessage, MessageType, QuestionOption } from "@/lib/message-types";
@@ -109,6 +110,12 @@ const messageConfig: Record<MessageType, {
     label: "Error",
     borderColor: "border-red-800/50",
     iconColor: "text-red-400",
+  },
+  system: {
+    icon: Info,
+    label: "System",
+    borderColor: "border-zinc-700/50",
+    iconColor: "text-zinc-400",
   },
 };
 

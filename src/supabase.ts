@@ -1756,3 +1756,85 @@ export async function linkTrackedCredentialToNode(
     throw error;
   }
 }
+
+// ============================================================================
+// Claude Code Messages
+// ============================================================================
+
+/**
+ * Message type for Claude Code messages.
+ */
+export type ClaudeCodeMessageType =
+  | "user_prompt"
+  | "assistant"
+  | "user_question"
+  | "tool_use"
+  | "tool_result"
+  | "final_output"
+  | "error"
+  | "system";
+
+/**
+ * Insert a Claude Code message using the RPC function.
+ */
+export async function insertClaudeCodeMessage(
+  sessionId: string,
+  messageType: ClaudeCodeMessageType,
+  content: string,
+  options?: {
+    toolName?: string;
+    toolStatus?: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<string | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    const url = new URL(`${SUPABASE_URL}/rest/v1/rpc/insert_claude_code_message`);
+
+    const response = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_KEY!,
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        p_session_id: sessionId,
+        p_message_type: messageType,
+        p_content: content,
+        p_options: null,
+        p_question_meta: null,
+        p_tool_name: options?.toolName || null,
+        p_tool_status: options?.toolStatus || null,
+        p_metadata: options?.metadata || {},
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`[Supabase] Failed to insert message: ${error}`);
+      return null;
+    }
+
+    const messageId = await response.text();
+    console.log(`[Supabase] Inserted ${messageType} message for session ${sessionId}`);
+    return messageId.replace(/"/g, ""); // Remove quotes from UUID response
+  } catch (error) {
+    console.error(`[Supabase] Failed to insert message:`, error);
+    return null;
+  }
+}
+
+/**
+ * Insert a system message (fire and forget).
+ */
+export function insertSystemMessageAsync(
+  sessionId: string,
+  content: string,
+  metadata?: Record<string, unknown>
+): void {
+  insertClaudeCodeMessage(sessionId, "system", content, { metadata }).catch(() => {
+    // Silently ignore - messages are best-effort
+  });
+}

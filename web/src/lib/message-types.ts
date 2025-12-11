@@ -10,7 +10,8 @@ export type MessageType =
   | "tool_use"        // Tool invocation (PreToolUse) - shows tool name and input
   | "tool_result"     // Tool result (PostToolUse) - shows tool output
   | "final_output"    // Final response when Claude stops
-  | "error";          // Error messages
+  | "error"           // Error messages
+  | "system";         // System messages (startup, info, etc.)
 
 export type ToolStatus = "pending" | "success" | "error";
 
