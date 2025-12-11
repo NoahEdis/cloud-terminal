@@ -493,14 +493,16 @@ export class TmuxSessionManager {
       await this.ensureBaseSession();
     }
 
-    // Create tmux session as part of the unified group
-    // This allows Ctrl+B P to cycle through all sessions (web and local)
+    // Create tmux session as an independent session (NOT grouped)
+    // Note: We intentionally do NOT use groupWith because grouped sessions share windows,
+    // which means commands sent to one session appear in all grouped sessions.
+    // Independent sessions are isolated but still visible via tmux list-sessions and Ctrl+B s.
     await tmux.createSession({
       name,
       cwd,
       width: cols,
       height: rows,
-      groupWith: this.baseSessionName || undefined,
+      // groupWith removed - sessions should be independent
     });
 
     const tmuxSession = await tmux.getSession(name);

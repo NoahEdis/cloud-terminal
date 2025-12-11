@@ -181,6 +181,8 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
   const [showArchived, setShowArchived] = useState(false);
   const [archivedSessions, setArchivedSessionsState] = useState<ArchivedSession[]>([]);
   const [isKillingAll, setIsKillingAll] = useState(false);
+  // Creating session state (prevents double-click)
+  const [isCreating, setIsCreating] = useState(false);
   // Drag and drop state
   const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
@@ -287,6 +289,10 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
   }, [filteredSessions, sessionFolders, folders]);
 
   const handleCreate = async () => {
+    // Prevent double-click creating multiple sessions
+    if (isCreating) return;
+    setIsCreating(true);
+
     try {
       // Build auto-run command based on chat type
       let autoRunCommand: string | undefined;
@@ -320,6 +326,8 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
       onSelect(sessionId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create session");
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -1308,11 +1316,11 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
             )}
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setShowNewSession(false)} className="h-8 text-[12px] border-zinc-800 text-zinc-300 hover:bg-zinc-900">
+            <Button variant="outline" onClick={() => setShowNewSession(false)} disabled={isCreating} className="h-8 text-[12px] border-zinc-800 text-zinc-300 hover:bg-zinc-900">
               Cancel
             </Button>
-            <Button onClick={handleCreate} className="h-8 text-[12px] bg-zinc-100 text-zinc-900 hover:bg-white">
-              Create
+            <Button onClick={handleCreate} disabled={isCreating} className="h-8 text-[12px] bg-zinc-100 text-zinc-900 hover:bg-white disabled:opacity-50">
+              {isCreating ? "Creating..." : "Create"}
             </Button>
           </DialogFooter>
         </DialogContent>
