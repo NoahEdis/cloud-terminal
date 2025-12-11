@@ -232,21 +232,6 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
     setSessionActiveFilter(sessionId, filter?.id || null);
   }, [sessionId]);
 
-  // Load saved filters from localStorage
-  useEffect(() => {
-    const filters = getSavedFilters();
-    setSavedFilters(filters);
-
-    // Load session-specific active filter
-    const activeFilterId = getSessionActiveFilter(sessionId);
-    if (activeFilterId) {
-      const filter = filters.find(f => f.id === activeFilterId);
-      if (filter) {
-        setActiveFilter(filter);
-      }
-    }
-  }, [sessionId]);
-
   // Fetch graph metadata
   const fetchMetadata = useCallback(async () => {
     try {
@@ -260,8 +245,8 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
     }
   }, []);
 
-  // Fetch full graph data
-  const fetchGraphData = useCallback(async () => {
+  // Fetch full graph data (clearFilter controls whether to clear activeFilter)
+  const fetchGraphData = useCallback(async (clearFilter: boolean = true) => {
     setLoading(true);
     setError(null);
 
@@ -272,7 +257,9 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
       }
       const graphData: GraphData = await response.json();
       setData(graphData);
-      updateActiveFilter(null); // Clear any active filter when refreshing
+      if (clearFilter) {
+        updateActiveFilter(null); // Only clear filter when explicitly refreshing
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch graph data");
     } finally {
@@ -281,7 +268,7 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
   }, [updateActiveFilter]);
 
   // Fetch contextual (traversal-based) graph data
-  const fetchContextualData = useCallback(async (filter: ContextFilter) => {
+  const fetchContextualData = useCallback(async (filter: ContextFilter, persistFilter: boolean = true) => {
     setLoading(true);
     setError(null);
 
@@ -310,7 +297,12 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
       }
       const result = await response.json();
       setData({ nodes: result.nodes, edges: result.edges });
-      updateActiveFilter(filter);
+      if (persistFilter) {
+        updateActiveFilter(filter);
+      } else {
+        // Just set local state without persisting (for restoring saved filter)
+        setActiveFilter(filter);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch contextual data");
     } finally {
@@ -318,10 +310,27 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
     }
   }, [updateActiveFilter]);
 
+  // Load saved filters and initialize data on session change
   useEffect(() => {
-    fetchGraphData();
+    const filters = getSavedFilters();
+    setSavedFilters(filters);
+
+    // Check for session-specific saved filter
+    const activeFilterId = getSessionActiveFilter(sessionId);
+    if (activeFilterId) {
+      const filter = filters.find(f => f.id === activeFilterId);
+      if (filter) {
+        // Restore the saved filter - fetch contextual data
+        fetchContextualData(filter, false); // false = don't re-persist, just restore
+        fetchMetadata();
+        return; // Don't fetch full graph
+      }
+    }
+
+    // No saved filter - fetch full graph
+    fetchGraphData(false); // false = don't clear filter (there isn't one)
     fetchMetadata();
-  }, [fetchGraphData, fetchMetadata]);
+  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Apply grouping to nodes
   const applyGrouping = useCallback((nodes: GraphNode[]): GraphNode[] => {
@@ -954,7 +963,7 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
 
         {/* Refresh */}
         <button
-          onClick={fetchGraphData}
+          onClick={() => fetchGraphData(true)}
           disabled={loading}
           className="p-1.5 rounded border border-zinc-800 hover:bg-zinc-800 text-zinc-400 transition-colors disabled:opacity-50"
           title="Refresh"
@@ -1024,7 +1033,7 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
               <AlertCircle className="w-6 h-6 mx-auto mb-2 text-red-400" />
               <p className="text-[13px] text-red-400 mb-2">{error}</p>
               <button
-                onClick={fetchGraphData}
+                onClick={() => fetchGraphData(true)}
                 className="text-[12px] text-zinc-400 hover:text-zinc-200 underline"
               >
                 Retry
