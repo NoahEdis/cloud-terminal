@@ -100,32 +100,45 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Starting node not found" }, { status: 404 });
     }
 
-    // Fetch all relationships
-    const edgesResponse = await fetch(
-      `${supabaseUrl}/rest/v1/graph_relationships?select=id,type,source_node_id,target_node_id,properties`,
-      {
-        headers: {
-          apikey: supabaseKey,
-          Authorization: `Bearer ${supabaseKey}`,
-          "Accept-Profile": "neo4j",
-        },
-      }
-    );
-
-    if (!edgesResponse.ok) {
-      return NextResponse.json(
-        { error: `Failed to fetch relationships: ${edgesResponse.statusText}` },
-        { status: edgesResponse.status }
-      );
-    }
-
+    // Fetch all relationships with pagination to handle >1000 rows
     const rawEdges: Array<{
       id: string;
       type: string;
       source_node_id: string;
       target_node_id: string;
       properties?: Record<string, unknown>;
-    }> = await edgesResponse.json();
+    }> = [];
+
+    const pageSize = 1000;
+    let offset = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const edgesResponse = await fetch(
+        `${supabaseUrl}/rest/v1/graph_relationships?select=id,type,source_node_id,target_node_id,properties&limit=${pageSize}&offset=${offset}`,
+        {
+          headers: {
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+            "Accept-Profile": "neo4j",
+          },
+        }
+      );
+
+      if (!edgesResponse.ok) {
+        return NextResponse.json(
+          { error: `Failed to fetch relationships: ${edgesResponse.statusText}` },
+          { status: edgesResponse.status }
+        );
+      }
+
+      const pageData: typeof rawEdges = await edgesResponse.json();
+      rawEdges.push(...pageData);
+
+      // If we got fewer than pageSize, we've reached the end
+      hasMore = pageData.length === pageSize;
+      offset += pageSize;
+    }
 
     // Build adjacency lists
     const outgoingEdges = new Map<string, typeof rawEdges>();
