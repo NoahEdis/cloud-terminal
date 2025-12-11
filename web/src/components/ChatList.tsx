@@ -393,6 +393,8 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
 
   const handleKill = async (id: string) => {
     console.log("[handleKill] ENTERED with id:", id);
+    console.log("[handleKill] localStorage terminalApiUrl:", localStorage.getItem("terminalApiUrl"));
+    console.log("[handleKill] localStorage terminalApiKey:", localStorage.getItem("terminalApiKey") ? "[set]" : "[not set]");
 
     // Skip confirmation for now - just kill directly for debugging
     console.log(`[ChatList] Killing session: ${id}`);
