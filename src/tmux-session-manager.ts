@@ -16,7 +16,7 @@ import type { IPty } from "node-pty";
 import type { WebSocket } from "ws";
 import * as tmux from "./tmux.js";
 import * as supabase from "./supabase.js";
-import { insertSystemMessageAsync } from "./supabase.js";
+import { insertClaudeCodeMessage } from "./supabase.js";
 import type { ActivityState, TaskStatus, SessionEventType } from "./types.js";
 import { updateTokenCount } from "./terminal-parser.js";
 
@@ -561,12 +561,15 @@ export class TmuxSessionManager {
       console.log(`[TmuxSessionManager] Auto-ran command in ${name}: ${config.autoRunCommand}`);
 
       // If this is a Claude Code session, insert a startup message
+      // Using 'assistant' type until 'system' is added to DB CHECK constraint
+      // To enable 'system' type, run: supabase/migrations/20241212_add_system_message_type.sql
       if (config.autoRunCommand.includes("claude")) {
-        insertSystemMessageAsync(
+        insertClaudeCodeMessage(
           name,
+          "assistant",
           `**Claude Code** session started\n\nWorking directory: \`${cwd}\``,
-          { chatType: config.chatType || "claude", autoRunCommand: config.autoRunCommand }
-        );
+          { metadata: { chatType: config.chatType || "claude", autoRunCommand: config.autoRunCommand, isStartupMessage: true } }
+        ).catch(err => console.error("[TmuxSessionManager] Failed to insert startup message:", err));
       }
     }
 
