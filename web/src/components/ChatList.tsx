@@ -392,6 +392,9 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
   };
 
   const handleKill = async (id: string) => {
+    // Debug: show alert to confirm handler is being called
+    alert(`Kill handler called for session: ${id}`);
+
     if (!confirm("Kill this session?")) return;
 
     console.log(`[ChatList] Killing session: ${id}`);
