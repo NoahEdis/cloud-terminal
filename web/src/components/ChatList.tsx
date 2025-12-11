@@ -653,7 +653,14 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
         )}
         <MenuSeparator className="bg-zinc-800" />
         <MenuItem
-          onSelect={() => handleKill(sessionId)}
+          onSelect={() => {
+            console.log("[MenuItem] onSelect fired for Kill:", sessionId);
+            handleKill(sessionId);
+          }}
+          onClick={() => {
+            console.log("[MenuItem] onClick fired for Kill:", sessionId);
+            handleKill(sessionId);
+          }}
           className="text-[12px] text-red-400 focus:text-red-400"
         >
           <Trash2 className="w-3 h-3 mr-2" />
@@ -740,7 +747,11 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
                       <MoreVertical className="w-3.5 h-3.5 text-zinc-500" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-44 bg-zinc-900 border-zinc-800">
+                  <DropdownMenuContent
+                    align="end"
+                    className="w-44 bg-zinc-900 border-zinc-800"
+                    onClick={(e) => console.log("[DropdownMenuContent] clicked, target:", (e.target as HTMLElement).textContent)}
+                  >
                     {renderSessionMenuItems(sessionId, false)}
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -774,7 +785,10 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
         <ContextMenuTrigger asChild>
           {sessionContent}
         </ContextMenuTrigger>
-        <ContextMenuContent className="w-44 bg-zinc-900 border-zinc-800">
+        <ContextMenuContent
+          className="w-44 bg-zinc-900 border-zinc-800"
+          onClick={(e) => console.log("[ContextMenuContent] clicked, target:", (e.target as HTMLElement).textContent)}
+        >
           {renderSessionMenuItems(sessionId, true)}
         </ContextMenuContent>
       </ContextMenu>
