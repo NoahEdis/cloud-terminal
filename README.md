@@ -4,9 +4,11 @@ A lightweight server that spawns and manages pseudo-terminals (PTYs) and exposes
 
 ## Features
 
-- **Session Persistence**: Terminals survive client disconnects
+- **Session Persistence**: Terminals survive client disconnects and server restarts (via tmux + Supabase)
 - **Multi-client Access**: Multiple clients can connect to the same terminal
 - **Output Buffering**: Reconnecting clients receive recent output history
+- **Data Persistence**: Session data, terminal output, and events stored in Supabase
+- **Claude Code Integration**: Activity state tracking via hooks for rich UI indicators
 - **API-first**: Full control via HTTP REST + WebSocket
 - **TypeScript**: Fully typed SDK included
 
@@ -246,11 +248,65 @@ The current MVP has no authentication - suitable for local development only.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed design documentation.
 
+## Data Persistence (Supabase)
+
+Enable Supabase persistence for durable sessions that survive server restarts:
+
+```bash
+export SUPABASE_URL=https://your-project.supabase.co
+export SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+export HOST_ID=server-1  # Optional: for multi-host deployments
+```
+
+### What's Persisted
+
+| Table | Description |
+|-------|-------------|
+| `terminal_sessions` | Session metadata, activity state, task status |
+| `terminal_output` | Raw terminal output in chunks (append-only) |
+| `session_events` | Audit log of session activity (see [docs/SESSION-EVENTS.md](./docs/SESSION-EVENTS.md)) |
+
+### Database Setup
+
+Apply migrations from `supabase/migrations/`:
+
+```bash
+# Using psql directly
+psql $DATABASE_URL -f supabase/migrations/20251212_session_events.sql
+
+# Or via Supabase dashboard SQL editor
+```
+
+## Claude Code Integration
+
+The server integrates with Claude Code hooks for activity state tracking:
+
+```bash
+# In your Claude Code hooks configuration, POST to:
+POST /api/sessions/:id/hook
+{
+  "event": "PreToolUse",
+  "tool_name": "Read"
+}
+```
+
+This enables:
+- Real-time activity indicators (idle/busy)
+- Task progress tracking (tool count, elapsed time)
+- Event logging for debugging
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md#claude-code-integration) for details.
+
 ## Limitations
 
 - **Not serverless compatible**: Requires persistent processes (won't work on Cloudflare Workers, Vercel Functions, AWS Lambda)
-- **Single instance**: No clustering support yet (sessions are in-memory)
-- **No persistence**: Sessions lost on server restart
+- **Single instance**: No clustering support yet (sessions are in-memory, but persisted to Supabase)
+- ~~**No persistence**~~: ✅ Sessions persist via tmux + Supabase
+
+## Documentation
+
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - System design and components
+- [docs/SESSION-EVENTS.md](./docs/SESSION-EVENTS.md) - Session events system for debugging
 
 ## License
 

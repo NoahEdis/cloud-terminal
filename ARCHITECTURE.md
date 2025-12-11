@@ -224,10 +224,114 @@ cloud-terminal/
 └── Dockerfile
 ```
 
+## Data Persistence (Supabase)
+
+The server optionally persists session data to Supabase for durability, debugging, and multi-host setups.
+
+### Database Schema
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Supabase PostgreSQL                              │
+│                                                                          │
+│  ┌─────────────────────┐   ┌─────────────────────┐                      │
+│  │  terminal_sessions  │   │   terminal_output   │                      │
+│  │                     │   │                     │                      │
+│  │  id (TEXT, PK)      │──►│  session_id (FK)    │                      │
+│  │  command, args      │   │  chunk_seq (INT)    │                      │
+│  │  cwd, cols, rows    │   │  data (TEXT)        │                      │
+│  │  status, exit_code  │   │  created_at         │                      │
+│  │  activity_state     │   └─────────────────────┘                      │
+│  │  current_tool       │                                                │
+│  │  task_start_time    │   ┌─────────────────────┐                      │
+│  │  tool_use_count     │   │   session_events    │                      │
+│  │  token_count        │   │                     │                      │
+│  │  task_completed_at  │──►│  session_id (FK)    │                      │
+│  │  host_id            │   │  event_type         │                      │
+│  │  created_at         │   │  details (JSONB)    │                      │
+│  │  last_activity      │   │  output_offset      │                      │
+│  └─────────────────────┘   │  created_at         │                      │
+│                            └─────────────────────┘                      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Session Events
+
+The `session_events` table provides an append-only audit log of session activity:
+
+| Event Type | Description |
+|------------|-------------|
+| `session_start` | Session created |
+| `session_exit` | Session terminated |
+| `session_attach` | WebSocket client connected |
+| `session_detach` | WebSocket client disconnected |
+| `task_start` | Claude Code task started (UserPromptSubmit hook) |
+| `task_complete` | Claude Code task finished (Stop/Notification hook) |
+| `tool_start` | Tool execution began (PreToolUse hook) |
+| `tool_complete` | Tool execution finished (PostToolUse hook) |
+| `state_idle` | Session became idle |
+| `state_busy` | Session became busy |
+
+Events include `output_offset` for correlation with raw terminal output, enabling timeline reconstruction.
+
+### Configuration
+
+Set these environment variables to enable persistence:
+
+```bash
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+HOST_ID=server-1  # Optional: identifier for multi-host deployments
+```
+
+## Claude Code Integration
+
+### Activity State Tracking
+
+Sessions track activity state for UI indicators:
+
+- **idle**: Waiting for user input (Claude sent Notification/Stop)
+- **busy**: Processing (Claude sent UserPromptSubmit/PreToolUse)
+- **exited**: Session terminated
+
+### Hook Integration
+
+Claude Code hooks notify the server of activity changes via HTTP:
+
+```
+POST /api/sessions/:id/hook
+{
+  "event": "PreToolUse",
+  "tool_name": "Read",
+  "session_id": "my-session"
+}
+```
+
+The server maps hooks to activity states:
+- `UserPromptSubmit` → busy (task start)
+- `PreToolUse` → busy (tool start)
+- `PostToolUse` → busy (tool complete)
+- `Notification`/`Stop` → idle (task complete)
+
+### Task Status Tracking
+
+Each session tracks task progress for rich UI display:
+
+```typescript
+interface TaskStatus {
+  activityState: ActivityState;
+  currentTool: string | null;      // Currently running tool
+  taskStartTime: string | null;    // ISO timestamp of task start
+  toolUseCount: number;            // Tools executed in current task
+  tokenCount: number;              // Parsed from terminal output
+  taskCompletedAt: string | null;  // ISO timestamp of completion
+}
+```
+
 ## Future Enhancements
 
-1. **Session Persistence**: Save/restore sessions across server restarts
+1. ~~**Session Persistence**~~: ✅ Implemented via Supabase
 2. **Recording**: Record terminal sessions for playback
-3. **Webhooks**: Notify external services on events
+3. ~~**Webhooks**~~: ✅ Implemented via Claude Code hooks
 4. **Multiple Users**: User isolation and access control
 5. **Clustering**: Multiple server instances with shared state
