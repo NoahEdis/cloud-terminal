@@ -96,6 +96,7 @@ interface ContextFilter {
 interface GraphViewProps {
   onNodeSelect?: (node: GraphNode | null) => void;
   className?: string;
+  sessionId?: string;
 }
 
 // ============================================================================
@@ -134,6 +135,7 @@ function getNodeColor(labels: string[]): string {
 // ============================================================================
 
 const SAVED_FILTERS_KEY = "graph_context_filters";
+const SESSION_ACTIVE_FILTER_KEY = "graph_session_active_filters";
 
 function getSavedFilters(): ContextFilter[] {
   if (typeof window === "undefined") return [];
@@ -150,11 +152,39 @@ function saveFilters(filters: ContextFilter[]) {
   localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(filters));
 }
 
+// Per-session active filter state
+function getSessionActiveFilter(sessionId: string | undefined): string | null {
+  if (typeof window === "undefined" || !sessionId) return null;
+  try {
+    const stored = localStorage.getItem(SESSION_ACTIVE_FILTER_KEY);
+    const map: Record<string, string> = stored ? JSON.parse(stored) : {};
+    return map[sessionId] || null;
+  } catch {
+    return null;
+  }
+}
+
+function setSessionActiveFilter(sessionId: string | undefined, filterId: string | null) {
+  if (typeof window === "undefined" || !sessionId) return;
+  try {
+    const stored = localStorage.getItem(SESSION_ACTIVE_FILTER_KEY);
+    const map: Record<string, string> = stored ? JSON.parse(stored) : {};
+    if (filterId) {
+      map[sessionId] = filterId;
+    } else {
+      delete map[sessionId];
+    }
+    localStorage.setItem(SESSION_ACTIVE_FILTER_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 // ============================================================================
 // Component
 // ============================================================================
 
-export default function GraphView({ onNodeSelect, className = "" }: GraphViewProps) {
+export default function GraphView({ onNodeSelect, className = "", sessionId }: GraphViewProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -196,10 +226,26 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphEdge> | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
+  // Helper to set active filter and persist to session storage
+  const updateActiveFilter = useCallback((filter: ContextFilter | null) => {
+    setActiveFilter(filter);
+    setSessionActiveFilter(sessionId, filter?.id || null);
+  }, [sessionId]);
+
   // Load saved filters from localStorage
   useEffect(() => {
-    setSavedFilters(getSavedFilters());
-  }, []);
+    const filters = getSavedFilters();
+    setSavedFilters(filters);
+
+    // Load session-specific active filter
+    const activeFilterId = getSessionActiveFilter(sessionId);
+    if (activeFilterId) {
+      const filter = filters.find(f => f.id === activeFilterId);
+      if (filter) {
+        setActiveFilter(filter);
+      }
+    }
+  }, [sessionId]);
 
   // Fetch graph metadata
   const fetchMetadata = useCallback(async () => {
@@ -226,13 +272,13 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
       }
       const graphData: GraphData = await response.json();
       setData(graphData);
-      setActiveFilter(null); // Clear any active filter when refreshing
+      updateActiveFilter(null); // Clear any active filter when refreshing
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch graph data");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [updateActiveFilter]);
 
   // Fetch contextual (traversal-based) graph data
   const fetchContextualData = useCallback(async (filter: ContextFilter) => {
@@ -264,13 +310,13 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
       }
       const result = await response.json();
       setData({ nodes: result.nodes, edges: result.edges });
-      setActiveFilter(filter);
+      updateActiveFilter(filter);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch contextual data");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [updateActiveFilter]);
 
   useEffect(() => {
     fetchGraphData();
@@ -735,7 +781,7 @@ export default function GraphView({ onNodeSelect, className = "" }: GraphViewPro
   };
 
   const clearActiveFilter = () => {
-    setActiveFilter(null);
+    updateActiveFilter(null);
     fetchGraphData();
   };
 

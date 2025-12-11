@@ -62,6 +62,7 @@ import {
   clearArchivedSessions,
   getPersistedSettings,
   updatePersistedSettings,
+  captureHistory,
   type ArchivedSession,
 } from "@/lib/api";
 import type { SessionInfo, SessionConfig, ActivityState, SessionMetrics, ChatType } from "@/lib/types";
@@ -392,30 +393,31 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
   };
 
   const handleKill = async (id: string) => {
-    console.log("[handleKill] ENTERED with id:", id);
-    console.log("[handleKill] localStorage terminalApiUrl:", localStorage.getItem("terminalApiUrl"));
-    console.log("[handleKill] localStorage terminalApiKey:", localStorage.getItem("terminalApiKey") ? "[set]" : "[not set]");
-
-    // Skip confirmation for now - just kill directly for debugging
-    console.log(`[ChatList] Killing session: ${id}`);
-
     try {
       // Find the session to archive it before killing
       const sessionToKill = sessions.find((s) => getSessionId(s) === id);
       if (sessionToKill) {
+        // Capture terminal history before killing (up to 500 lines)
+        let terminalHistory: string | undefined;
+        try {
+          const historyResponse = await captureHistory(id, { lines: 500, format: "plain" });
+          terminalHistory = historyResponse.content;
+        } catch {
+          // History capture failed, continue without it
+        }
+
         archiveSession({
           id: getSessionId(sessionToKill),
           name: sessionToKill.name,
           command: sessionToKill.command,
           cwd: sessionToKill.cwd,
           createdAt: sessionToKill.lastActivity,
+          terminalHistory,
         });
         setArchivedSessionsState(getArchivedSessions());
       }
 
-      console.log(`[ChatList] Calling killSession API for: ${id}`);
       await killSession(id);
-      console.log(`[ChatList] killSession completed for: ${id}`);
 
       // Calculate remaining sessions before updating state
       const remainingSessions = sessions.filter((s) => getSessionId(s) !== id);
@@ -653,19 +655,7 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
         )}
         <MenuSeparator className="bg-zinc-800" />
         <MenuItem
-          onSelect={() => {
-            console.log("[MenuItem] onSelect fired for Kill:", sessionId);
-            console.log("[MenuItem] typeof handleKill:", typeof handleKill);
-            try {
-              handleKill(sessionId);
-              console.log("[MenuItem] handleKill called successfully");
-            } catch (e) {
-              console.error("[MenuItem] handleKill threw error:", e);
-            }
-          }}
-          onClick={() => {
-            console.log("[MenuItem] onClick fired for Kill:", sessionId);
-          }}
+          onSelect={() => handleKill(sessionId)}
           className="text-[12px] text-red-400 focus:text-red-400"
         >
           <Trash2 className="w-3 h-3 mr-2" />
@@ -755,7 +745,6 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
                   <DropdownMenuContent
                     align="end"
                     className="w-44 bg-zinc-900 border-zinc-800"
-                    onClick={(e) => console.log("[DropdownMenuContent] clicked, target:", (e.target as HTMLElement).textContent)}
                   >
                     {renderSessionMenuItems(sessionId, false)}
                   </DropdownMenuContent>
@@ -792,7 +781,6 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
         </ContextMenuTrigger>
         <ContextMenuContent
           className="w-44 bg-zinc-900 border-zinc-800"
-          onClick={(e) => console.log("[ContextMenuContent] clicked, target:", (e.target as HTMLElement).textContent)}
         >
           {renderSessionMenuItems(sessionId, true)}
         </ContextMenuContent>

@@ -11,16 +11,49 @@ import { Input } from "@/components/ui/input";
 // ============================================================================
 
 interface CanvasViewProps {
-  /** Session ID for future session-scoped diagrams (not currently used) */
+  /** Session ID for session-scoped diagram selection */
   sessionId?: string;
   className?: string;
+}
+
+// ============================================================================
+// LocalStorage helpers for per-session diagram selection
+// ============================================================================
+
+const SESSION_SELECTED_DIAGRAM_KEY = "canvas_session_selected_diagrams";
+
+function getSessionSelectedDiagram(sessionId: string | undefined): string | null {
+  if (typeof window === "undefined" || !sessionId) return null;
+  try {
+    const stored = localStorage.getItem(SESSION_SELECTED_DIAGRAM_KEY);
+    const map: Record<string, string> = stored ? JSON.parse(stored) : {};
+    return map[sessionId] || null;
+  } catch {
+    return null;
+  }
+}
+
+function setSessionSelectedDiagram(sessionId: string | undefined, diagramId: string | null) {
+  if (typeof window === "undefined" || !sessionId) return;
+  try {
+    const stored = localStorage.getItem(SESSION_SELECTED_DIAGRAM_KEY);
+    const map: Record<string, string> = stored ? JSON.parse(stored) : {};
+    if (diagramId) {
+      map[sessionId] = diagramId;
+    } else {
+      delete map[sessionId];
+    }
+    localStorage.setItem(SESSION_SELECTED_DIAGRAM_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore storage errors
+  }
 }
 
 // ============================================================================
 // Component
 // ============================================================================
 
-export default function CanvasView({ sessionId: _sessionId, className }: CanvasViewProps) {
+export default function CanvasView({ sessionId, className }: CanvasViewProps) {
   const [diagrams, setDiagrams] = useState<FigmaDiagram[]>([]);
   const [selectedDiagram, setSelectedDiagram] = useState<FigmaDiagram | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -28,6 +61,12 @@ export default function CanvasView({ sessionId: _sessionId, className }: CanvasV
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<string | null>(null);
+
+  // Helper to update selected diagram and persist to session storage
+  const updateSelectedDiagram = useCallback((diagram: FigmaDiagram | null) => {
+    setSelectedDiagram(diagram);
+    setSessionSelectedDiagram(sessionId, diagram?.id || null);
+  }, [sessionId]);
 
   // Fetch diagrams from API
   const fetchDiagrams = useCallback(async () => {
@@ -48,11 +87,22 @@ export default function CanvasView({ sessionId: _sessionId, className }: CanvasV
       }
 
       const data = await response.json();
-      setDiagrams(data.diagrams || []);
+      const fetchedDiagrams: FigmaDiagram[] = data.diagrams || [];
+      setDiagrams(fetchedDiagrams);
 
-      // Auto-select first diagram if none selected
-      if (data.diagrams?.length > 0 && !selectedDiagram) {
-        setSelectedDiagram(data.diagrams[0]);
+      // Try to restore session-specific diagram selection
+      const savedDiagramId = getSessionSelectedDiagram(sessionId);
+      if (savedDiagramId) {
+        const savedDiagram = fetchedDiagrams.find(d => d.id === savedDiagramId);
+        if (savedDiagram) {
+          setSelectedDiagram(savedDiagram);
+          return;
+        }
+      }
+
+      // Fall back to auto-selecting first diagram if none selected
+      if (fetchedDiagrams.length > 0 && !selectedDiagram) {
+        setSelectedDiagram(fetchedDiagrams[0]);
       }
     } catch (err) {
       console.error("Error fetching diagrams:", err);
@@ -60,7 +110,7 @@ export default function CanvasView({ sessionId: _sessionId, className }: CanvasV
     } finally {
       setIsLoading(false);
     }
-  }, [selectedCategory, selectedType, searchQuery, selectedDiagram]);
+  }, [selectedCategory, selectedType, searchQuery, selectedDiagram, sessionId]);
 
   useEffect(() => {
     fetchDiagrams();
@@ -176,7 +226,7 @@ export default function CanvasView({ sessionId: _sessionId, className }: CanvasV
             filteredDiagrams.map((diagram) => (
               <button
                 key={diagram.id}
-                onClick={() => setSelectedDiagram(diagram)}
+                onClick={() => updateSelectedDiagram(diagram)}
                 className={cn(
                   "w-full text-left p-2.5 rounded-lg border transition-colors",
                   selectedDiagram?.id === diagram.id

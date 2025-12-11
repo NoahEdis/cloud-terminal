@@ -196,10 +196,10 @@ export default function Terminal({ sessionId, onExit, onError }: TerminalProps) 
             break;
           case "history":
             xtermRef.current?.write(cleanTerminalOutput(msg.data));
-            // Scroll to bottom after history loads
-            setTimeout(() => {
+            // Scroll to bottom after history loads - use requestAnimationFrame to ensure render complete
+            requestAnimationFrame(() => {
               xtermRef.current?.scrollToBottom();
-            }, 50);
+            });
             break;
           case "exit":
             intentionalCloseRef.current = true; // Don't reconnect on exit

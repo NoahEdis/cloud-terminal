@@ -352,6 +352,24 @@ This context can be pasted into a new Claude Code session to provide continuity.
   }
 });
 
+// Get tmux window info for a session (for matching with local tmux status bar)
+tmuxApi.get("/sessions/:name/windows", async (c) => {
+  const name = c.req.param("name");
+  const session = tmuxSessionManager.get(name);
+
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const windowInfo = await tmuxSessionManager.getSessionWindows(name);
+  return c.json({
+    session: name,
+    windowCount: windowInfo.windowList.length,
+    windows: windowInfo.windowList,
+    activeWindowName: windowInfo.activeWindowName,
+  });
+});
+
 // Update activity state directly for a specific session
 tmuxApi.post("/sessions/:name/activity", async (c) => {
   const name = c.req.param("name");

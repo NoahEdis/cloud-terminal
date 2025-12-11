@@ -298,6 +298,31 @@ export async function pollOutput(id: string, offset: number = 0): Promise<PollRe
   return res.json();
 }
 
+// Tmux window info for matching with local tmux status bar
+export interface TmuxWindowInfo {
+  index: number;
+  name: string;
+  active: boolean;
+}
+
+export interface WindowInfoResponse {
+  session: string;
+  windowCount: number;
+  windows: TmuxWindowInfo[];
+  activeWindowName?: string;
+}
+
+export async function getSessionWindows(id: string): Promise<WindowInfoResponse> {
+  const res = await fetch(`${getApiUrl()}/api/sessions/${id}/windows`, {
+    headers: headers(),
+  });
+  if (!res.ok) {
+    if (res.status === 404) throw new Error("Session not found");
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // Local storage helpers for chat names
 const CHAT_NAMES_KEY = "terminal_chat_names";
 
@@ -818,6 +843,8 @@ export interface ArchivedChat {
   killedAt: string;
   folder?: string;
   description?: string;
+  /** Truncated terminal history (last ~500 lines) */
+  terminalHistory?: string;
 }
 
 // Legacy alias
@@ -841,6 +868,7 @@ export function archiveChat(chat: {
   command?: string;
   cwd: string;
   createdAt?: string;
+  terminalHistory?: string;
 }): void {
   const archived = getArchivedChats();
   const chatFolders = getChatFolders();
@@ -849,6 +877,13 @@ export function archiveChat(chat: {
 
   // Don't archive if already exists
   if (archived.some((c) => c.id === chat.id)) return;
+
+  // Truncate terminal history to avoid localStorage overflow (max ~100KB per session)
+  let terminalHistory = chat.terminalHistory;
+  if (terminalHistory && terminalHistory.length > 100000) {
+    // Keep last 100KB
+    terminalHistory = terminalHistory.slice(-100000);
+  }
 
   const archivedChat: ArchivedChat = {
     id: chat.id,
@@ -859,6 +894,7 @@ export function archiveChat(chat: {
     killedAt: new Date().toISOString(),
     folder: chatFolders[chat.id],
     description: chatDescriptions[chat.id],
+    terminalHistory,
   };
 
   // Add to front and limit size

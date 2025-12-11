@@ -98,6 +98,12 @@ export interface SessionMetrics {
   estimatedTokens: number;
 }
 
+export interface TmuxWindowInfo {
+  index: number;
+  name: string;
+  active: boolean;
+}
+
 export interface TmuxSessionInfo {
   name: string;
   cwd: string;
@@ -111,6 +117,10 @@ export interface TmuxSessionInfo {
   source: "cloud" | "local";
   attached: boolean; // Whether attached locally (via tmux attach)
   windows: number;
+  /** Window list with active window indicated (for tmux status matching) */
+  windowList?: TmuxWindowInfo[];
+  /** Name of the active window (e.g., "Process Termination") */
+  activeWindowName?: string;
   // Metrics for context tracking
   metrics: SessionMetrics;
 }
@@ -556,6 +566,30 @@ export class TmuxSessionManager {
       windows: s.tmuxSession?.windows || 1,
       metrics: s.metrics,
     }));
+  }
+
+  /**
+   * Get detailed window info for a session (async operation).
+   * Returns the window list and active window name.
+   */
+  async getSessionWindows(name: string): Promise<{ windowList: TmuxWindowInfo[]; activeWindowName?: string }> {
+    const session = this.sessions.get(name);
+    if (!session) {
+      return { windowList: [] };
+    }
+
+    const windows = await tmux.getSessionWindows(name);
+    const windowList: TmuxWindowInfo[] = windows.map(w => ({
+      index: w.index,
+      name: w.name,
+      active: w.active,
+    }));
+
+    const activeWindow = windows.find(w => w.active);
+    return {
+      windowList,
+      activeWindowName: activeWindow?.name,
+    };
   }
 
   /**

@@ -414,6 +414,7 @@ export default function MessageView({
   const [error, setError] = useState<string | null>(null);
   const [activityState, setActivityState] = useState<ActivityState | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Load initial messages and session state
@@ -421,6 +422,7 @@ export default function MessageView({
     async function loadMessages() {
       setIsLoading(true);
       setError(null);
+      setInitialLoadComplete(false);
       try {
         const initialMessages = await getSessionMessages(sessionId);
         setMessages(initialMessages);
@@ -438,6 +440,8 @@ export default function MessageView({
         setError(err instanceof Error ? err.message : "Failed to load messages");
       } finally {
         setIsLoading(false);
+        // Mark initial load complete after a small delay to allow render
+        setTimeout(() => setInitialLoadComplete(true), 100);
       }
     }
 
@@ -479,11 +483,13 @@ export default function MessageView({
   }, [sessionId]);
 
   // Auto-scroll to bottom
+  // Use instant scroll on initial load to avoid visible scrolling, smooth for updates
   useEffect(() => {
     if (autoScroll && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+      const behavior = initialLoadComplete ? "smooth" : "instant";
+      messagesEndRef.current.scrollIntoView({ behavior });
     }
-  }, [messages, autoScroll]);
+  }, [messages, autoScroll, initialLoadComplete]);
 
   // Handle answering a question
   const handleAnswer = useCallback(async (messageId: string, response: string) => {

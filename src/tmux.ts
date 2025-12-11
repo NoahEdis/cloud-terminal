@@ -86,6 +86,35 @@ export async function listSessions(): Promise<TmuxSession[]> {
 }
 
 /**
+ * Get windows for a tmux session.
+ */
+export async function getSessionWindows(name: string): Promise<TmuxWindow[]> {
+  try {
+    // Format: window_index:window_name:window_active:window_panes
+    const format = "#{window_index}:#{window_name}:#{window_active}:#{window_panes}";
+    const { stdout } = await execAsync(
+      `tmux list-windows -t '${escapeTmuxName(name)}' -F '${format}' 2>/dev/null`
+    );
+
+    return stdout
+      .trim()
+      .split("\n")
+      .filter(line => line.length > 0)
+      .map(line => {
+        const [index, name, active, panes] = line.split(":");
+        return {
+          index: parseInt(index, 10),
+          name,
+          active: active === "1",
+          panes: parseInt(panes, 10),
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Get all pane PIDs for a session.
  * Used for deduplication - sessions with shared panes are duplicates.
  */

@@ -26,9 +26,11 @@ import {
   sendInput,
   uploadImage,
   getSessionMessageCount,
+  getSessionWindows,
   connectionManager,
   migrateLocalStorage,
   type ConnectionStatus,
+  type WindowInfoResponse,
 } from "@/lib/api";
 import type { SessionInfo } from "@/lib/types";
 import { getSessionId } from "@/lib/types";
@@ -72,6 +74,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [messageCount, setMessageCount] = useState<number>(0);
   const [voiceChatOpen, setVoiceChatOpen] = useState(false);
+  const [windowInfo, setWindowInfo] = useState<WindowInfoResponse | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -143,6 +146,26 @@ export default function Home() {
     fetchMessageCount();
     // Refresh count periodically
     const interval = setInterval(fetchMessageCount, 10000);
+    return () => clearInterval(interval);
+  }, [selectedSessionId]);
+
+  // Fetch tmux window info for the selected session
+  useEffect(() => {
+    async function fetchWindowInfo() {
+      if (!selectedSessionId) {
+        setWindowInfo(null);
+        return;
+      }
+      try {
+        const info = await getSessionWindows(selectedSessionId);
+        setWindowInfo(info);
+      } catch {
+        setWindowInfo(null);
+      }
+    }
+    fetchWindowInfo();
+    // Refresh window info periodically (windows can change)
+    const interval = setInterval(fetchWindowInfo, 10000);
     return () => clearInterval(interval);
   }, [selectedSessionId]);
 
@@ -361,6 +384,15 @@ export default function Home() {
                   ))}
                 </SelectContent>
               </Select>
+              {/* Tmux window indicator - shows active window name for matching with local tmux */}
+              {windowInfo?.activeWindowName && (
+                <span
+                  className="text-[11px] text-zinc-500 bg-zinc-800/50 px-1.5 py-0.5 rounded font-mono truncate max-w-32"
+                  title={`Tmux windows: ${windowInfo.windows.map(w => `${w.index}:${w.name}${w.active ? '*' : ''}`).join(' ')}`}
+                >
+                  * {windowInfo.activeWindowName}
+                </span>
+              )}
             </>
           )}
 
@@ -370,6 +402,15 @@ export default function Home() {
               <span className="text-[12px] text-zinc-400 font-mono">
                 {sessions.find(s => getSessionId(s) === selectedSessionId)?.name || selectedSessionId.slice(0, 12)}
               </span>
+              {/* Tmux window indicator for messages view */}
+              {windowInfo?.activeWindowName && (
+                <span
+                  className="text-[11px] text-zinc-500 bg-zinc-800/50 px-1.5 py-0.5 rounded font-mono truncate max-w-32"
+                  title={`Tmux windows: ${windowInfo.windows.map(w => `${w.index}:${w.name}${w.active ? '*' : ''}`).join(' ')}`}
+                >
+                  * {windowInfo.activeWindowName}
+                </span>
+              )}
             </>
           )}
 
@@ -501,7 +542,7 @@ export default function Home() {
                 </div>
               )
             ) : viewMode === "graph" ? (
-              <GraphView />
+              <GraphView sessionId={selectedSessionId || undefined} />
             ) : (
               <CanvasView sessionId={selectedSessionId || undefined} />
             )}
