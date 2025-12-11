@@ -144,7 +144,7 @@ const getApiUrl = () => {
     if (stored) {
       url = stored;
     } else {
-      url = process.env.NEXT_PUBLIC_TERMINAL_API_URL || "http://localhost:3001";
+      url = process.env.NEXT_PUBLIC_TERMINAL_API_URL || "http://localhost:31337";
     }
   } else {
     url = process.env.NEXT_PUBLIC_TERMINAL_API_URL || "http://localhost:3001";
@@ -155,7 +155,7 @@ const getApiUrl = () => {
 
 // Export getters for use in UI components
 export const getDefaultApiUrl = () => {
-  return (process.env.NEXT_PUBLIC_TERMINAL_API_URL || "http://localhost:3001").replace(/\/+$/, "");
+  return (process.env.NEXT_PUBLIC_TERMINAL_API_URL || "http://localhost:31337").replace(/\/+$/, "");
 };
 
 export const getDefaultApiKey = () => {
