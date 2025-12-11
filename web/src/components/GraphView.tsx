@@ -731,6 +731,8 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
   };
 
   // Context filter functions
+  const [filterName, setFilterName] = useState("");
+
   const createContextFilterFromNode = (node: GraphNode) => {
     setFilterBuilderState({
       rootNodeId: node.id,
@@ -742,18 +744,17 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
       excludeRelationships: [],
       includeRelationships: [],
     });
+    setFilterName(node.label || "New Filter");
     setShowFilterBuilder(true);
   };
 
   const saveContextFilter = () => {
     if (!filterBuilderState.rootNodeId || !filterBuilderState.rootNodeLabel) return;
-
-    const filterName = prompt("Filter name:", filterBuilderState.rootNodeLabel);
-    if (!filterName) return;
+    if (!filterName.trim()) return;
 
     const newFilter: ContextFilter = {
       id: Date.now().toString(),
-      name: filterName,
+      name: filterName.trim(),
       rootNodeId: filterBuilderState.rootNodeId,
       rootNodeLabel: filterBuilderState.rootNodeLabel,
       direction: filterBuilderState.direction || "outgoing",
@@ -768,6 +769,7 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
     setSavedFilters(updated);
     saveFilters(updated);
     setShowFilterBuilder(false);
+    setFilterName("");
   };
 
   const applyContextFilter = (filter: ContextFilter) => {
@@ -1231,6 +1233,18 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
             </div>
 
             <div className="p-4 space-y-4">
+              {/* Filter name */}
+              <div>
+                <div className="text-[11px] text-zinc-500 mb-1">Filter name</div>
+                <Input
+                  value={filterName}
+                  onChange={(e) => setFilterName(e.target.value)}
+                  placeholder="Enter filter name..."
+                  className="h-8 text-[12px] bg-zinc-800 border-zinc-700 text-zinc-200 placeholder:text-zinc-500"
+                  autoFocus
+                />
+              </div>
+
               {/* Root node */}
               <div>
                 <div className="text-[11px] text-zinc-500 mb-1">Starting from</div>
@@ -1354,7 +1368,10 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setShowFilterBuilder(false)}
+                onClick={() => {
+                  setShowFilterBuilder(false);
+                  setFilterName("");
+                }}
                 className="text-zinc-400 hover:text-zinc-200"
               >
                 Cancel
@@ -1362,7 +1379,8 @@ export default function GraphView({ onNodeSelect, className = "", sessionId }: G
               <Button
                 size="sm"
                 onClick={saveContextFilter}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white"
+                disabled={!filterName.trim()}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Save Filter
               </Button>
