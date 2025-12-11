@@ -561,14 +561,12 @@ export class TmuxSessionManager {
       console.log(`[TmuxSessionManager] Auto-ran command in ${name}: ${config.autoRunCommand}`);
 
       // If this is a Claude Code session, insert a startup message
-      // Using 'assistant' type until 'system' is added to DB CHECK constraint
-      // To enable 'system' type, run: supabase/migrations/20241212_add_system_message_type.sql
       if (config.autoRunCommand.includes("claude")) {
         insertClaudeCodeMessage(
           name,
-          "assistant",
+          "system",
           `**Claude Code** session started\n\nWorking directory: \`${cwd}\``,
-          { metadata: { chatType: config.chatType || "claude", autoRunCommand: config.autoRunCommand, isStartupMessage: true } }
+          { metadata: { chatType: config.chatType || "claude", autoRunCommand: config.autoRunCommand } }
         ).catch(err => console.error("[TmuxSessionManager] Failed to insert startup message:", err));
       }
     }
