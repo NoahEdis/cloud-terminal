@@ -5,7 +5,7 @@
  * allowing sessions to survive server restarts.
  */
 
-import type { ActivityState } from "./types.js";
+import type { ActivityState, SessionEventType, SessionEvent } from "./types.js";
 
 // Environment variables
 const SUPABASE_URL = process.env.SUPABASE_URL?.replace(/\/+$/, "");
@@ -431,6 +431,134 @@ export async function shutdownSupabase(): Promise<void> {
   // Flush all pending output
   await flushAllOutput();
   console.log("[Supabase] Flushed all pending output");
+}
+
+// ============================================================================
+// Session Events
+// ============================================================================
+
+// Track output offset per session for event correlation
+const outputOffsets = new Map<string, number>();
+
+/**
+ * Get current output offset for a session.
+ */
+export function getOutputOffset(sessionId: string): number {
+  return outputOffsets.get(sessionId) || 0;
+}
+
+/**
+ * Update output offset for a session (called when output is appended).
+ */
+export function updateOutputOffset(sessionId: string, bytesAdded: number): void {
+  const current = outputOffsets.get(sessionId) || 0;
+  outputOffsets.set(sessionId, current + bytesAdded);
+}
+
+/**
+ * Record a session event to the database.
+ */
+export async function recordSessionEvent(
+  sessionId: string,
+  eventType: SessionEventType,
+  details?: Record<string, unknown>,
+  clientTimestamp?: Date
+): Promise<number | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  const outputOffset = getOutputOffset(sessionId);
+
+  try {
+    const result = await supabaseRequest<{ id: number }[]>("POST", "/session_events", {
+      body: {
+        session_id: sessionId,
+        event_type: eventType,
+        details: details || {},
+        output_offset: outputOffset,
+        client_timestamp: clientTimestamp?.toISOString() || null,
+      },
+      headers: {
+        Prefer: "return=representation",
+      },
+    });
+
+    return result[0]?.id || null;
+  } catch (error) {
+    console.error(`[Supabase] Failed to record event ${eventType} for session ${sessionId}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Record a session event (fire and forget - doesn't wait for response).
+ */
+export function recordSessionEventAsync(
+  sessionId: string,
+  eventType: SessionEventType,
+  details?: Record<string, unknown>,
+  clientTimestamp?: Date
+): void {
+  recordSessionEvent(sessionId, eventType, details, clientTimestamp).catch(() => {
+    // Silently ignore - events are best-effort
+  });
+}
+
+/**
+ * Get events for a session.
+ */
+export async function getSessionEvents(
+  sessionId: string,
+  options?: {
+    since?: Date;
+    until?: Date;
+    eventTypes?: SessionEventType[];
+    limit?: number;
+  }
+): Promise<SessionEvent[]> {
+  if (!isSupabaseEnabled()) return [];
+
+  try {
+    const searchParams: Record<string, string> = {
+      session_id: `eq.${sessionId}`,
+      order: "created_at.asc",
+    };
+
+    if (options?.since) {
+      searchParams["created_at"] = `gte.${options.since.toISOString()}`;
+    }
+    if (options?.until) {
+      searchParams["created_at"] = `lte.${options.until.toISOString()}`;
+    }
+    if (options?.eventTypes && options.eventTypes.length > 0) {
+      searchParams["event_type"] = `in.(${options.eventTypes.join(",")})`;
+    }
+    if (options?.limit) {
+      searchParams["limit"] = String(options.limit);
+    }
+
+    const results = await supabaseRequest<Array<{
+      id: number;
+      session_id: string;
+      event_type: SessionEventType;
+      details: Record<string, unknown>;
+      output_offset: number | null;
+      created_at: string;
+      client_timestamp: string | null;
+    }>>("GET", "/session_events", { searchParams });
+
+    return results.map(r => ({
+      id: r.id,
+      sessionId: r.session_id,
+      eventType: r.event_type,
+      details: r.details,
+      outputOffset: r.output_offset ?? undefined,
+      createdAt: r.created_at,
+      clientTimestamp: r.client_timestamp ?? undefined,
+    }));
+  } catch (error) {
+    console.error(`[Supabase] Failed to get events for session ${sessionId}:`, error);
+    return [];
+  }
 }
 
 // ============================================================================

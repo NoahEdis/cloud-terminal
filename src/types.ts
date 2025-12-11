@@ -91,3 +91,39 @@ export type ServerMessage =
   | { type: "error"; message: string }
   | { type: "ping"; timestamp: number }
   | { type: "activity"; state: ActivityState; taskStatus?: TaskStatus };
+
+// Session event types for debugging and analysis
+export type SessionEventType =
+  // Session lifecycle
+  | "session_start"
+  | "session_restart"
+  | "session_exit"
+  | "session_attach"
+  | "session_detach"
+  // Claude Code specific
+  | "compact"
+  | "clear"
+  | "task_start"
+  | "task_complete"
+  // Tool usage
+  | "tool_start"
+  | "tool_complete"
+  // Activity state changes
+  | "state_idle"
+  | "state_busy"
+  // Terminal events
+  | "terminal_clear"
+  | "output_truncated"
+  // Errors
+  | "error"
+  | "hook_error";
+
+export interface SessionEvent {
+  id?: number;
+  sessionId: string;
+  eventType: SessionEventType;
+  details?: Record<string, unknown>;
+  outputOffset?: number;
+  createdAt?: string;
+  clientTimestamp?: string;
+}

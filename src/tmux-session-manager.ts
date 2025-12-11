@@ -16,8 +16,17 @@ import type { IPty } from "node-pty";
 import type { WebSocket } from "ws";
 import * as tmux from "./tmux.js";
 import * as supabase from "./supabase.js";
-import type { ActivityState, TaskStatus } from "./types.js";
+import type { ActivityState, TaskStatus, SessionEventType } from "./types.js";
 import { updateTokenCount } from "./terminal-parser.js";
+
+// Helper to record session events
+function recordEvent(
+  sessionId: string,
+  eventType: SessionEventType,
+  details?: Record<string, unknown>
+): void {
+  supabase.recordSessionEventAsync(sessionId, eventType, details);
+}
 
 const MAX_BUFFER_SIZE = 100_000; // ~2000 lines of 50 chars
 
@@ -443,6 +452,9 @@ export class TmuxSessionManager {
         session.status = "exited";
         session.activityState = "exited";
 
+        // Record session exit event
+        recordEvent(name, "session_exit", { reason: "tmux_session_gone" });
+
         // Notify clients
         const message = JSON.stringify({ type: "exit", code: 0 });
         for (const client of session.clients) {
@@ -517,6 +529,9 @@ export class TmuxSessionManager {
 
     this.sessions.set(name, session);
     console.log(`[TmuxSessionManager] Created session: ${name}`);
+
+    // Record session start event
+    recordEvent(name, "session_start", { cwd, cols, rows });
 
     // Persist to Supabase
     supabase.createSession({
@@ -771,6 +786,9 @@ export class TmuxSessionManager {
       ws.send(JSON.stringify({ type: "exit", code: 0 }));
     }
 
+    // Record client attach event
+    recordEvent(name, "session_attach", { clientCount: session.clients.size });
+
     console.log(`[TmuxSessionManager] Client connected to ${name} (${session.clients.size} clients)`);
     return true;
   }
@@ -783,6 +801,10 @@ export class TmuxSessionManager {
     if (!session) return;
 
     session.clients.delete(ws);
+
+    // Record client detach event
+    recordEvent(name, "session_detach", { clientCount: session.clients.size });
+
     console.log(`[TmuxSessionManager] Client disconnected from ${name} (${session.clients.size} clients)`);
 
     // If no more cloud clients, we can optionally detach the PTY
@@ -827,6 +849,9 @@ export class TmuxSessionManager {
       // Parse terminal output for token counts (supplementary to hooks)
       session.tokenCount = updateTokenCount(session.tokenCount, data);
 
+      // Update output offset for event correlation
+      supabase.updateOutputOffset(session.name, data.length);
+
       // Broadcast to all connected clients
       const message = JSON.stringify({ type: "output", data });
       for (const client of session.clients) {
@@ -849,6 +874,9 @@ export class TmuxSessionManager {
         if (!exists) {
           session.status = "exited";
           session.activityState = "exited";
+
+          // Record session exit event
+          recordEvent(session.name, "session_exit", { reason: "pty_exit", exitCode });
 
           const message = JSON.stringify({ type: "exit", code: exitCode });
           for (const client of session.clients) {
@@ -934,7 +962,7 @@ export class TmuxSessionManager {
     const now = new Date();
     const prevState = session.activityState;
 
-    // Track task lifecycle based on hook events
+    // Track task lifecycle based on hook events and record events
     if (hookEvent === "UserPromptSubmit") {
       // New task starting - reset counters
       session.taskStartTime = now;
@@ -942,18 +970,36 @@ export class TmuxSessionManager {
       session.tokenCount = 0;
       session.taskCompletedAt = null;
       session.currentTool = null;
+      recordEvent(name, "task_start", { hookEvent });
     } else if (hookEvent === "PreToolUse" && toolName) {
       // Tool starting
       session.currentTool = toolName;
       session.toolUseCount++;
+      recordEvent(name, "tool_start", { toolName, toolUseCount: session.toolUseCount });
     } else if (hookEvent === "PostToolUse") {
       // Tool finished - keep currentTool visible briefly, clear on next event
+      recordEvent(name, "tool_complete", { toolName: session.currentTool });
     } else if (hookEvent === "Stop" || hookEvent === "Notification") {
       // Task completed
       if (prevState === "busy") {
         session.taskCompletedAt = now;
+        recordEvent(name, "task_complete", {
+          hookEvent,
+          toolUseCount: session.toolUseCount,
+          durationMs: session.taskStartTime
+            ? now.getTime() - session.taskStartTime.getTime()
+            : null,
+        });
       }
       session.currentTool = null;
+    }
+
+    // Record state changes
+    if (state !== prevState) {
+      const eventType = state === "idle" ? "state_idle" : state === "busy" ? "state_busy" : null;
+      if (eventType) {
+        recordEvent(name, eventType, { prevState, hookEvent });
+      }
     }
 
     session.activityState = state;
