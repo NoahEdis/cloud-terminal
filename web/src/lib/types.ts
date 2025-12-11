@@ -41,7 +41,6 @@ export interface ChatInfo {
   recentOutput?: string;
   activityState?: ActivityState;
   // Tmux-specific fields
-  source?: "local" | "cloud";
   attached?: boolean;
   windows?: number;
   // Client-side only (stored in localStorage)

@@ -60,8 +60,8 @@ export function createTmuxTerminalServer(config: ServerConfig = {}) {
       timestamp: new Date().toISOString(),
       sessions: {
         total: sessions.length,
-        local: sessions.filter(s => s.source === "local").length,
-        cloud: sessions.filter(s => s.source === "cloud").length,
+        running: sessions.filter(s => s.status === "running").length,
+        attached: sessions.filter(s => s.attached).length,
       },
       tailscale: {
         connected: tailscale.connected,

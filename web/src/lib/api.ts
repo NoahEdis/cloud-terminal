@@ -234,7 +234,8 @@ export async function killChat(id: string): Promise<void> {
 export async function killAllChats(): Promise<void> {
   const chats = await listChats();
   await Promise.all(chats.map((c) => {
-    const id = c.source === "local" ? c.id : c.name;
+    // Use name (tmux session name) or id (PTY mode), preferring name
+    const id = c.name || c.id;
     if (!id) return Promise.resolve(); // Skip if no valid ID
     return killChat(id);
   }));

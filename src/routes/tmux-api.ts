@@ -45,7 +45,6 @@ tmuxApi.post("/sessions", async (c) => {
         name: session.name,
         cwd: session.cwd,
         status: session.status,
-        source: session.source,
         createdAt: session.createdAt.toISOString(),
       },
       201
@@ -72,7 +71,6 @@ tmuxApi.get("/sessions/:name", (c) => {
     rows: session.rows,
     status: session.status,
     activityState: session.activityState,
-    source: session.source,
     createdAt: session.createdAt.toISOString(),
     lastActivity: session.lastActivity.toISOString(),
     clientCount: session.clients.size,

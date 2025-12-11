@@ -82,8 +82,6 @@ export interface TmuxManagedSession {
   // Session state
   status: "running" | "exited";
   activityState: ActivityState;
-  // Whether created via cloud terminal or discovered locally
-  source: "cloud" | "local";
   // Metrics for context tracking
   metrics: SessionMetrics;
   // Task status tracking for visual indicators
@@ -121,7 +119,6 @@ export interface TmuxSessionInfo {
   status: "running" | "exited";
   clientCount: number;
   activityState: ActivityState;
-  source: "cloud" | "local";
   attached: boolean; // Whether attached locally (via tmux attach)
   windows: number;
   /** Window list with active window indicated (for tmux status matching) */
@@ -413,7 +410,6 @@ export class TmuxSessionManager {
           clients: new Set(),
           status: "running",
           activityState: "idle",
-          source: ts.name.startsWith(CLOUD_SESSION_PREFIX) ? "cloud" : "local",
           metrics: createInitialMetrics(),
           // Task status tracking
           currentTool: null,
@@ -510,7 +506,6 @@ export class TmuxSessionManager {
       clients: new Set(),
       status: "running",
       activityState: "idle",
-      source: "cloud",
       metrics: createInitialMetrics(),
       // Task status tracking
       currentTool: null,
@@ -582,7 +577,6 @@ export class TmuxSessionManager {
       status: s.status,
       clientCount: s.clients.size,
       activityState: s.activityState,
-      source: s.source,
       attached: s.tmuxSession?.attached || false,
       windows: s.tmuxSession?.windows || 1,
       metrics: s.metrics,
