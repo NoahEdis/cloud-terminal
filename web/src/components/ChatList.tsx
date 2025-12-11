@@ -392,6 +392,7 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
   };
 
   const handleKill = async (id: string) => {
+    console.log("[handleKill] ENTERED with id:", id);
     // Debug: show alert to confirm handler is being called
     alert(`Kill handler called for session: ${id}`);
 
@@ -655,11 +656,16 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
         <MenuItem
           onSelect={() => {
             console.log("[MenuItem] onSelect fired for Kill:", sessionId);
-            handleKill(sessionId);
+            console.log("[MenuItem] typeof handleKill:", typeof handleKill);
+            try {
+              handleKill(sessionId);
+              console.log("[MenuItem] handleKill called successfully");
+            } catch (e) {
+              console.error("[MenuItem] handleKill threw error:", e);
+            }
           }}
           onClick={() => {
             console.log("[MenuItem] onClick fired for Kill:", sessionId);
-            handleKill(sessionId);
           }}
           className="text-[12px] text-red-400 focus:text-red-400"
         >
