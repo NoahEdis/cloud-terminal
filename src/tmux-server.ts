@@ -17,6 +17,7 @@ import { tmuxApi } from "./routes/tmux-api.js";
 import { credentialsApi } from "./routes/credentials-api.js";
 import { settingsApi } from "./routes/settings-api.js";
 import { brainApi } from "./routes/brain-api.js";
+import { githubApi } from "./routes/github-api.js";
 import { handleTmuxWebSocketConnection } from "./websocket/tmux-handler.js";
 import { tmuxSessionManager } from "./tmux-session-manager.js";
 import { authMiddleware } from "./middleware/auth.js";
@@ -43,7 +44,7 @@ export function createTmuxTerminalServer(config: ServerConfig = {}) {
   app.use("*", cors({
     origin: (origin) => origin || "https://web-noah-edis-projects.vercel.app",
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization", "X-API-Key"],
+    allowHeaders: ["Content-Type", "Authorization", "X-API-Key", "X-GitHub-Token"],
     exposeHeaders: ["Content-Length"],
     maxAge: 86400,
     credentials: true,
@@ -86,6 +87,7 @@ export function createTmuxTerminalServer(config: ServerConfig = {}) {
   app.route("/api/credentials", credentialsApi);
   app.route("/api/settings", settingsApi);
   app.route("/api/brain", brainApi);
+  app.route("/api/github", githubApi);
 
   // Create HTTP server
   const httpServer = createServer();

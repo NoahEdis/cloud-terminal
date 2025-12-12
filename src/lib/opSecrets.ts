@@ -98,3 +98,142 @@ export async function getAccountCredentialRefs(
 
   return refs;
 }
+
+// ============================================================================
+// Credential Value Fetching
+// ============================================================================
+
+// 1Password Connect configuration
+const connectHost = process.env.ONEPASSWORD_CONNECT_HOST?.replace(/\/+$/, "") ?? "";
+const connectToken = process.env.ONEPASSWORD_CONNECT_TOKEN ?? "";
+const serviceAccountToken = process.env.OP_SERVICE_ACCOUNT_TOKEN;
+
+interface CachedItem {
+  id: string;
+  fields: Array<{
+    id: string;
+    label: string;
+    value?: string;
+  }>;
+}
+
+const itemCache = new Map<string, CachedItem>();
+
+/**
+ * Fetch an item via 1Password Connect HTTP API.
+ */
+async function fetchItemViaConnect(
+  itemId: string,
+  vaultId: string
+): Promise<CachedItem> {
+  const cacheKey = `connect:${vaultId}:${itemId}`;
+  const cached = itemCache.get(cacheKey);
+  if (cached) return cached;
+
+  const response = await fetch(
+    `${connectHost}/v1/vaults/${vaultId}/items/${itemId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${connectToken}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const payload = await response.text();
+    throw new Error(
+      `Failed to fetch 1Password item ${itemId}: ${response.status} ${payload}`
+    );
+  }
+
+  const data = (await response.json()) as CachedItem;
+  itemCache.set(cacheKey, data);
+  return data;
+}
+
+/**
+ * Fetch an item via 1Password CLI with Service Account token.
+ */
+async function fetchItemViaCLI(
+  itemId: string,
+  vaultId: string,
+  token: string
+): Promise<CachedItem> {
+  const cacheKey = `cli:${vaultId}:${itemId}`;
+  const cached = itemCache.get(cacheKey);
+  if (cached) return cached;
+
+  const { execSync } = await import("child_process");
+
+  try {
+    const result = execSync(
+      `op item get "${itemId}" --vault "${vaultId}" --format json`,
+      {
+        env: {
+          ...process.env,
+          OP_SERVICE_ACCOUNT_TOKEN: token,
+        },
+        encoding: "utf-8",
+        maxBuffer: 1024 * 1024,
+        stdio: ["pipe", "pipe", "pipe"],
+      }
+    );
+
+    const data = JSON.parse(result) as CachedItem;
+    itemCache.set(cacheKey, data);
+    return data;
+  } catch (error) {
+    throw new Error(
+      `Failed to fetch 1Password item ${itemId} via CLI: ${error}`
+    );
+  }
+}
+
+/**
+ * Extract a field value from a cached item.
+ */
+function extractField(item: CachedItem, fieldLabel: string): string {
+  const field = item.fields.find((f) => f.label === fieldLabel);
+  if (!field?.value) {
+    throw new Error(
+      `Field "${fieldLabel}" not found or empty in item ${item.id}`
+    );
+  }
+  return field.value;
+}
+
+/**
+ * Get a single credential value by account and env var name.
+ */
+export async function getAccountCredential(
+  accountName: string,
+  envVarName: string
+): Promise<string> {
+  const config = loadAccountConfig(accountName);
+  const ref = config.credentials[envVarName];
+
+  if (!ref) {
+    throw new Error(
+      `No credential "${envVarName}" found for account "${accountName}"`
+    );
+  }
+
+  const vaultId = ref.vaultId ?? config.vaultId;
+
+  // Try CLI with Service Account token first
+  if (serviceAccountToken) {
+    const item = await fetchItemViaCLI(ref.itemId, vaultId, serviceAccountToken);
+    return extractField(item, ref.fieldLabel);
+  }
+
+  // Fall back to 1Password Connect (HTTP API)
+  if (connectHost && connectToken) {
+    const item = await fetchItemViaConnect(ref.itemId, vaultId);
+    return extractField(item, ref.fieldLabel);
+  }
+
+  throw new Error(
+    "1Password is not configured. Set OP_SERVICE_ACCOUNT_TOKEN or ONEPASSWORD_CONNECT_HOST + ONEPASSWORD_CONNECT_TOKEN."
+  );
+}

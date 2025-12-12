@@ -1605,3 +1605,331 @@ export async function getBrainGraph(): Promise<BrainGraphData> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
+
+// ============================================================================
+// Auto-Title Generation API
+// ============================================================================
+
+export interface GenerateTitleResponse {
+  name: string;
+  description: string;
+}
+
+/**
+ * Generate a session name and description from a user message.
+ * Uses Claude to analyze the message and create a concise title.
+ */
+export async function generateChatTitle(
+  message: string,
+  clientApiKey?: string
+): Promise<GenerateTitleResponse> {
+  const res = await fetch("/api/generate-title", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      message,
+      clientApiKey,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+
+  return res.json();
+}
+
+// Track which sessions have had auto-title generation attempted
+const AUTO_TITLE_ATTEMPTED_KEY = "terminal_auto_title_attempted";
+
+export function getAutoTitleAttempted(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const data = JSON.parse(localStorage.getItem(AUTO_TITLE_ATTEMPTED_KEY) || "[]");
+    return new Set(data);
+  } catch {
+    return new Set();
+  }
+}
+
+export function markAutoTitleAttempted(sessionId: string): void {
+  const attempted = getAutoTitleAttempted();
+  attempted.add(sessionId);
+  // Keep only the last 1000 session IDs to prevent unbounded growth
+  const arr = Array.from(attempted).slice(-1000);
+  localStorage.setItem(AUTO_TITLE_ATTEMPTED_KEY, JSON.stringify(arr));
+}
+
+export function hasAutoTitleBeenAttempted(sessionId: string): boolean {
+  return getAutoTitleAttempted().has(sessionId);
+}
+
+// ============================================================================
+// GitHub Context Files API
+// ============================================================================
+
+const GITHUB_PAT_KEY = "github_pat";
+const COMMIT_MESSAGE_MODEL_KEY = "commit_message_model";
+
+/**
+ * Get GitHub Personal Access Token from localStorage.
+ */
+export function getGitHubPat(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem(GITHUB_PAT_KEY) || "";
+}
+
+/**
+ * Store GitHub Personal Access Token in localStorage.
+ */
+export function setGitHubPat(pat: string): void {
+  if (typeof window === "undefined") return;
+  if (pat.trim()) {
+    localStorage.setItem(GITHUB_PAT_KEY, pat.trim());
+  } else {
+    localStorage.removeItem(GITHUB_PAT_KEY);
+  }
+}
+
+/**
+ * Get the AI model to use for commit message generation.
+ */
+export function getCommitMessageModel(): string {
+  if (typeof window === "undefined") return "gemini-2.0-flash-exp";
+  return localStorage.getItem(COMMIT_MESSAGE_MODEL_KEY) || "gemini-2.0-flash-exp";
+}
+
+/**
+ * Set the AI model for commit message generation.
+ */
+export function setCommitMessageModel(model: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(COMMIT_MESSAGE_MODEL_KEY, model);
+}
+
+/**
+ * GitHub headers including the PAT token.
+ */
+function githubHeaders(): HeadersInit {
+  const h = headers();
+  const pat = getGitHubPat();
+  if (pat) {
+    (h as Record<string, string>)["X-GitHub-Token"] = pat;
+  }
+  return h;
+}
+
+/**
+ * GitHub connection status response.
+ */
+export interface GitHubStatus {
+  connected: boolean;
+  user?: string;
+  hasRepoAccess?: boolean;
+  repo?: string;
+  error?: string;
+}
+
+/**
+ * Test GitHub connection with the stored PAT.
+ */
+export async function testGitHubConnection(): Promise<GitHubStatus> {
+  const pat = getGitHubPat();
+  if (!pat) {
+    return { connected: false, error: "No token configured" };
+  }
+
+  try {
+    const res = await fetch(`${getApiUrl()}/api/github/status`, {
+      headers: githubHeaders(),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  } catch (err) {
+    return {
+      connected: false,
+      error: err instanceof Error ? err.message : "Connection failed",
+    };
+  }
+}
+
+/**
+ * Context file response from GitHub.
+ */
+export interface ContextFileResponse {
+  content: string;
+  sha: string;
+  lastModified: string;
+  exists: boolean;
+}
+
+/**
+ * Get the path for a folder's context file.
+ */
+export function getContextFilePath(folderName: string): string {
+  // Sanitize folder name for use in file path
+  const safeName = folderName.replace(/[^a-zA-Z0-9_-]/g, "-");
+  return `cloud-terminal/projects/${safeName}/CONTEXT.md`;
+}
+
+/**
+ * Fetch a project context file from GitHub.
+ */
+export async function getContextFile(folderName: string): Promise<ContextFileResponse> {
+  const path = getContextFilePath(folderName);
+
+  const res = await fetch(
+    `${getApiUrl()}/api/github/file?path=${encodeURIComponent(path)}`,
+    { headers: githubHeaders() }
+  );
+
+  if (res.status === 404) {
+    return {
+      content: "",
+      sha: "",
+      lastModified: "",
+      exists: false,
+    };
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Save a project context file to GitHub.
+ */
+export async function saveContextFile(
+  folderName: string,
+  content: string,
+  message: string,
+  sha?: string
+): Promise<{ success: boolean; commitSha?: string; fileSha?: string; error?: string }> {
+  const path = getContextFilePath(folderName);
+
+  const res = await fetch(`${getApiUrl()}/api/github/commit`, {
+    method: "POST",
+    headers: githubHeaders(),
+    body: JSON.stringify({
+      path,
+      content,
+      message,
+      sha,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return { success: false, error: err.error || `HTTP ${res.status}` };
+  }
+
+  return res.json();
+}
+
+/**
+ * Generate a commit message for context file changes.
+ */
+export async function generateCommitMessage(
+  oldContent: string,
+  newContent: string,
+  model?: string
+): Promise<string> {
+  const res = await fetch(`${getApiUrl()}/api/github/generate-commit-message`, {
+    method: "POST",
+    headers: githubHeaders(),
+    body: JSON.stringify({
+      oldContent,
+      newContent,
+      model: model || getCommitMessageModel(),
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  return data.message;
+}
+
+/**
+ * Create a new context file with the default template.
+ */
+export function getContextFileTemplate(projectName: string): string {
+  return `# ${projectName}
+
+## Overview
+<!-- Brief description of this project -->
+
+## Key Files
+<!-- Important files and their purposes -->
+
+## Architecture
+<!-- High-level architecture notes -->
+
+## Patterns & Conventions
+<!-- Coding patterns used in this project -->
+
+## Current State
+<!-- What's working, what's in progress -->
+
+## TODOs
+<!-- Upcoming tasks or known issues -->
+`;
+}
+
+/**
+ * Create a new context file for a project folder.
+ */
+export async function createContextFile(
+  folderName: string
+): Promise<{ success: boolean; error?: string }> {
+  const pat = getGitHubPat();
+  if (!pat) {
+    return { success: false, error: "GitHub token not configured" };
+  }
+
+  const content = getContextFileTemplate(folderName);
+  const message = `Initialize context file for ${folderName}`;
+
+  return saveContextFile(folderName, content, message);
+}
+
+/**
+ * Available AI models for commit message generation.
+ */
+export interface AIModel {
+  id: string;
+  name: string;
+  provider: string;
+  default?: boolean;
+}
+
+/**
+ * Get available AI models for commit message generation.
+ */
+export async function getAvailableModels(): Promise<AIModel[]> {
+  try {
+    const res = await fetch(`${getApiUrl()}/api/github/models`, {
+      headers: headers(),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return data.models;
+  } catch {
+    // Return defaults if API fails
+    return [
+      { id: "gemini-2.0-flash-exp", name: "Gemini 2.0 Flash", provider: "google", default: true },
+      { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", provider: "google" },
+      { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "openai" },
+    ];
+  }
+}

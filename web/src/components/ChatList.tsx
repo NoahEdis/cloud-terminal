@@ -20,6 +20,7 @@ import {
   Star,
   Clock,
   FileCode,
+  FileText,
   Search,
   Archive,
   History,
@@ -64,6 +65,8 @@ import {
   getPersistedSettings,
   updatePersistedSettings,
   captureHistory,
+  createContextFile,
+  getGitHubPat,
   type ArchivedSession,
 } from "@/lib/api";
 import type { SessionInfo, SessionConfig, ActivityState, SessionMetrics, ChatType } from "@/lib/types";
@@ -252,7 +255,18 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
     fetchSessions();
 
     const interval = setInterval(fetchSessions, 2000);
-    return () => clearInterval(interval);
+
+    // Listen for auto-generated chat name updates
+    const handleChatNameUpdated = () => {
+      setSessionNamesState(getSessionNames());
+      setSessionDescriptionsState(getSessionDescriptions());
+    };
+    window.addEventListener("chat-name-updated", handleChatNameUpdated);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("chat-name-updated", handleChatNameUpdated);
+    };
   }, [fetchSessions]);
 
   // Filter sessions and archived sessions by search query
@@ -551,12 +565,24 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
     fetchSessions();
   };
 
-  const handleCreateFolder = () => {
+  const handleCreateFolder = async () => {
     if (newFolderName.trim()) {
-      addFolder(newFolderName.trim());
+      const folderName = newFolderName.trim();
+      addFolder(folderName);
       setFoldersState(getFoldersList());
       setNewFolderName("");
       setShowNewFolder(false);
+
+      // Auto-create context file in GitHub if PAT is configured
+      const pat = getGitHubPat();
+      if (pat) {
+        try {
+          await createContextFile(folderName);
+          console.log(`[ChatList] Created context file for folder: ${folderName}`);
+        } catch (err) {
+          console.error(`[ChatList] Failed to create context file:`, err);
+        }
+      }
     }
   };
 
@@ -878,6 +904,10 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
                   <DropdownMenuItem onClick={() => handleEditDocFile(folderName)} className="text-[12px]">
                     <FileCode className="w-3 h-3 mr-2" />
                     {folderDocFiles[folderName] ? "Edit Doc File" : "Set Doc File"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => router.push(`/context/${encodeURIComponent(folderName)}`)} className="text-[12px]">
+                    <FileText className="w-3 h-3 mr-2" />
+                    Edit Context File
                   </DropdownMenuItem>
                   <DropdownMenuSeparator className="bg-zinc-800" />
                   <DropdownMenuItem
@@ -1488,6 +1518,30 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
                       }`}
                     />
                   </button>
+                </div>
+              </div>
+            </div>
+
+            {/* GitHub Integration */}
+            <div className="border-t border-zinc-800 pt-4 mt-4">
+              <h4 className="text-[12px] font-medium text-zinc-300 mb-3">GitHub Integration</h4>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-zinc-900/50 rounded border border-zinc-800">
+                  <div>
+                    <p className="text-[12px] text-zinc-200">Project Context Files</p>
+                    <p className="text-[10px] text-zinc-500">Sync project context to GitHub with AI commit messages</p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowSettings(false);
+                      router.push("/settings");
+                    }}
+                    className="h-7 px-3 text-[11px] border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                  >
+                    <Settings className="w-3 h-3 mr-1.5" />
+                    Configure
+                  </Button>
                 </div>
               </div>
             </div>
