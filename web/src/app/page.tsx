@@ -16,12 +16,12 @@ import {
   ChevronDown,
   CornerDownLeft,
   X,
-  ImagePlus,
+  Plus,
   Loader2,
   Mic,
   Square,
   WifiOff,
-  Phone,
+  Headphones,
   Copy,
   Check,
 } from "lucide-react";
@@ -292,7 +292,7 @@ export default function Home() {
       setPendingImages([]);
       // Reset textarea height after clearing
       if (inputRef.current) {
-        inputRef.current.style.height = "36px";
+        inputRef.current.style.height = "52px";
         inputRef.current.style.overflowY = "hidden";
       }
       inputRef.current?.blur();
@@ -711,7 +711,8 @@ export default function Home() {
               </div>
             )}
 
-            <form onSubmit={handleSendCommand} className="flex gap-1.5">
+            {/* ChatGPT-style pill input */}
+            <form onSubmit={handleSendCommand} className="relative">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -720,51 +721,9 @@ export default function Home() {
                 onChange={handleFileInputChange}
               />
 
-              {/* Image upload button */}
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={sessionStatus !== "running" || uploadingImage}
-                className="p-2 rounded border border-zinc-800 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {uploadingImage ? (
-                  <Loader2 className="w-4 h-4 text-zinc-400 animate-spin" />
-                ) : (
-                  <ImagePlus className="w-4 h-4 text-zinc-400" />
-                )}
-              </button>
-
-              {/* Microphone button (dictation) */}
-              <button
-                type="button"
-                onClick={isRecording ? stopRecording : startRecording}
-                disabled={sessionStatus !== "running"}
-                className={`p-2 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                  isRecording
-                    ? "border-red-600 bg-red-950/50 hover:bg-red-900/50"
-                    : "border-zinc-800 hover:bg-zinc-800"
-                }`}
-                title="Voice dictation"
-              >
-                {isRecording ? (
-                  <Square className="w-4 h-4 text-red-400" />
-                ) : (
-                  <Mic className="w-4 h-4 text-zinc-400" />
-                )}
-              </button>
-
-              {/* Voice chat button */}
-              <button
-                type="button"
-                onClick={() => setVoiceChatOpen(true)}
-                className="p-2 rounded border border-zinc-800 hover:bg-zinc-800 transition-colors"
-                title="Live voice chat"
-              >
-                <Phone className="w-4 h-4 text-zinc-400" />
-              </button>
-
-              {/* Message input */}
-              <div className="flex-1">
+              {/* Pill container */}
+              <div className="relative bg-zinc-900 border border-zinc-700/50 rounded-[26px] shadow-[0_0_0_1px_rgba(255,255,255,0.05)] focus-within:border-zinc-600 transition-colors">
+                {/* Textarea */}
                 <textarea
                   ref={inputRef}
                   value={command}
@@ -777,25 +736,74 @@ export default function Home() {
                       e.preventDefault();
                       handleSendCommand(e);
                     }
-                    // Shift+Enter allows new line (default behavior)
                   }}
                   onPaste={handlePaste}
                   placeholder="Message..."
                   disabled={sessionStatus !== "running"}
                   rows={1}
-                  className="w-full px-3 py-2 text-[13px] bg-zinc-900 border border-zinc-800 rounded-md placeholder:text-zinc-600 focus-visible:ring-1 focus-visible:ring-zinc-700 focus:outline-none resize-none leading-5 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ minHeight: "36px", maxHeight: "380px", overflowY: "hidden" }}
+                  className="w-full bg-transparent text-[14px] text-zinc-100 placeholder:text-zinc-500 focus:outline-none resize-none leading-6 disabled:opacity-50 disabled:cursor-not-allowed pl-12 pr-24 py-3"
+                  style={{ minHeight: "52px", maxHeight: "200px", overflowY: "hidden" }}
                 />
-              </div>
 
-              {/* Send button */}
-              <button
-                type="submit"
-                disabled={sessionStatus !== "running" || (!command.trim() && pendingImages.length === 0)}
-                className="h-9 w-9 rounded-full bg-zinc-100 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
-              >
-                <ArrowUp className="w-4 h-4 text-zinc-900" />
-              </button>
+                {/* Plus button (media upload) - bottom left inside pill */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={sessionStatus !== "running" || uploadingImage}
+                  className="absolute left-2 bottom-2 w-8 h-8 rounded-full bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+                  title="Add media"
+                >
+                  {uploadingImage ? (
+                    <Loader2 className="w-4 h-4 text-zinc-400 animate-spin" />
+                  ) : (
+                    <Plus className="w-4 h-4 text-zinc-400" />
+                  )}
+                </button>
+
+                {/* Right side buttons - bottom right inside pill */}
+                <div className="absolute right-2 bottom-2 flex items-center gap-1">
+                  {/* Microphone button (dictation) */}
+                  <button
+                    type="button"
+                    onClick={isRecording ? stopRecording : startRecording}
+                    disabled={sessionStatus !== "running"}
+                    className={`w-8 h-8 rounded-full transition-colors flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed ${
+                      isRecording
+                        ? "bg-red-600 hover:bg-red-500"
+                        : "bg-zinc-800 hover:bg-zinc-700"
+                    }`}
+                    title="Voice dictation"
+                  >
+                    {isRecording ? (
+                      <Square className="w-3.5 h-3.5 text-white" />
+                    ) : (
+                      <Mic className="w-4 h-4 text-zinc-400" />
+                    )}
+                  </button>
+
+                  {/* Voice chat button */}
+                  <button
+                    type="button"
+                    onClick={() => setVoiceChatOpen(true)}
+                    disabled={sessionStatus !== "running"}
+                    className="w-8 h-8 rounded-full bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+                    title="Live voice chat"
+                  >
+                    <Headphones className="w-4 h-4 text-zinc-400" />
+                  </button>
+
+                  {/* Send button - only shows when there's content */}
+                  {(command.trim() || pendingImages.length > 0) && (
+                    <button
+                      type="submit"
+                      disabled={sessionStatus !== "running"}
+                      className="w-8 h-8 rounded-full bg-zinc-100 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+                    >
+                      <ArrowUp className="w-4 h-4 text-zinc-900" />
+                    </button>
+                  )}
+                </div>
+              </div>
             </form>
           </div>
           )}
