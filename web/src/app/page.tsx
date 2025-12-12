@@ -47,13 +47,6 @@ import { getSessionId } from "@/lib/types";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import ChatList from "@/components/ChatList";
 
 const Terminal = dynamic(() => import("@/components/Terminal"), { ssr: false });
@@ -442,70 +435,53 @@ export default function Home() {
             {viewMode === "terminal" ? "Terminal" : viewMode === "messages" ? "Messages" : viewMode === "graph" ? "Knowledge Graph" : "Canvas"}
           </span>
 
-          {viewMode === "terminal" && sessions.length > 0 && (
-            <>
-              <span className="text-zinc-600">/</span>
-              <Select value={selectedSessionId || ""} onValueChange={handleSelectSession}>
-                <SelectTrigger className="h-7 w-44 text-[12px] bg-transparent border-zinc-800 text-zinc-400">
-                  <SelectValue placeholder="Select chat" />
-                </SelectTrigger>
-                <SelectContent>
-                  {sessions.map((session) => (
-                    <SelectItem key={getSessionId(session)} value={getSessionId(session)} className="text-[12px]">
-                      <div className="flex items-center gap-1.5">
-                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${session.status === "running" ? "bg-emerald-500" : "bg-zinc-600"}`} />
-                        <span className="truncate">{session.name || session.cwd.split("/").pop()}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {/* Tmux window indicator - shows active window name for matching with local tmux */}
-              {windowInfo?.activeWindowName && (
-                <span
-                  className="text-[11px] text-zinc-500 bg-zinc-800/50 px-1.5 py-0.5 rounded font-mono truncate max-w-32"
-                  title={`Tmux windows: ${windowInfo.windows.map(w => `${w.index}:${w.name}${w.active ? '*' : ''}`).join(' ')}`}
-                >
-                  * {windowInfo.activeWindowName}
-                </span>
-              )}
-            </>
-          )}
-
-          {viewMode === "messages" && selectedSessionId && (
-            <>
-              <span className="text-zinc-600">/</span>
-              <span className="text-[12px] text-zinc-400 font-mono">
-                {sessions.find(s => getSessionId(s) === selectedSessionId)?.name || selectedSessionId.slice(0, 12)}
-              </span>
-              {/* Tmux window indicator for messages view */}
-              {windowInfo?.activeWindowName && (
-                <span
-                  className="text-[11px] text-zinc-500 bg-zinc-800/50 px-1.5 py-0.5 rounded font-mono truncate max-w-32"
-                  title={`Tmux windows: ${windowInfo.windows.map(w => `${w.index}:${w.name}${w.active ? '*' : ''}`).join(' ')}`}
-                >
-                  * {windowInfo.activeWindowName}
-                </span>
-              )}
-            </>
-          )}
-
-          {/* Session ID with copy button - shown when a session is selected */}
+          {/* Session ID badge with live indicator and copy button */}
           {selectedSessionId && (
-            <button
-              onClick={copySessionId}
-              className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-900/50 border border-zinc-800/50 hover:bg-zinc-800/50 hover:border-zinc-700/50 transition-colors group"
-              title={`Session ID: ${selectedSessionId}\nClick to copy`}
-            >
-              <span className="text-[10px] text-zinc-500 font-mono truncate max-w-24">
-                {selectedSessionId.length > 12 ? selectedSessionId.slice(0, 12) + "..." : selectedSessionId}
-              </span>
-              {copiedSessionId ? (
-                <Check className="w-3 h-3 text-emerald-500" />
-              ) : (
-                <Copy className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300" />
+            <>
+              <span className="text-zinc-600">/</span>
+              <button
+                onClick={copySessionId}
+                className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-zinc-900/80 border border-zinc-800 hover:bg-zinc-800/80 hover:border-zinc-700 transition-colors group"
+                title={`Session: ${selectedSessionId}\nClick to copy`}
+              >
+                {/* Live indicator */}
+                <div
+                  className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                    currentSession?.activityState === "busy"
+                      ? "bg-amber-500 animate-pulse"
+                      : currentSession?.activityState === "idle"
+                      ? "bg-emerald-500"
+                      : "bg-zinc-600"
+                  }`}
+                  title={
+                    currentSession?.activityState === "busy"
+                      ? "Running"
+                      : currentSession?.activityState === "idle"
+                      ? "Waiting for input"
+                      : "Exited"
+                  }
+                />
+                {/* Session ID */}
+                <span className="text-[11px] text-zinc-300 font-mono">
+                  {selectedSessionId}
+                </span>
+                {/* Copy icon */}
+                {copiedSessionId ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5 text-zinc-500 group-hover:text-zinc-300 flex-shrink-0" />
+                )}
+              </button>
+              {/* Tmux window indicator */}
+              {windowInfo?.activeWindowName && (
+                <span
+                  className="text-[11px] text-zinc-500 bg-zinc-800/50 px-1.5 py-0.5 rounded font-mono truncate max-w-32"
+                  title={`Tmux windows: ${windowInfo.windows.map(w => `${w.index}:${w.name}${w.active ? '*' : ''}`).join(' ')}`}
+                >
+                  * {windowInfo.activeWindowName}
+                </span>
               )}
-            </button>
+            </>
           )}
 
           {/* Connection status indicator */}
@@ -817,7 +793,7 @@ export default function Home() {
       {/* Version indicator - click to view changelog */}
       <Link
         href="/changelog"
-        className="fixed bottom-2 left-2 px-2 py-1 rounded bg-zinc-900/80 border border-zinc-800/50 text-[10px] text-zinc-600 hover:text-zinc-400 hover:border-zinc-700 font-mono z-50 transition-colors"
+        className="fixed bottom-3 left-3 px-2 py-0.5 rounded bg-zinc-900/90 border border-zinc-800/60 text-[10px] text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 font-mono z-50 transition-colors"
         title="View changelog"
       >
         v{packageJson.version}

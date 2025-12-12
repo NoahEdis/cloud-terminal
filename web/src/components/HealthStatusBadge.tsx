@@ -9,7 +9,7 @@ import {
 import type { HealthStatus } from "@/lib/credential-types";
 
 interface HealthStatusBadgeProps {
-  status: HealthStatus;
+  status?: HealthStatus | null;
   checkedAt?: string | null;
   className?: string;
 }
@@ -30,7 +30,8 @@ export function HealthStatusBadge({
   checkedAt,
   className,
 }: HealthStatusBadgeProps) {
-  const config = statusConfig[status];
+  // Default to "unknown" if status is undefined or null
+  const config = statusConfig[status ?? "unknown"];
 
   const formatDate = (iso: string) => {
     try {

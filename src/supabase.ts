@@ -1384,13 +1384,13 @@ export interface CredentialNode {
   notes: string | null;
   api_docs_md: string | null;
   tracked_credential_id: string | null;
-  // Credential metadata
-  last_used_at: string | null;
-  health_status: HealthStatus;
-  health_checked_at: string | null;
-  scope: string[];
+  // Credential metadata (optional - may not be populated yet)
+  last_used_at?: string | null;
+  health_status?: HealthStatus | null;
+  health_checked_at?: string | null;
+  scope?: string[];
   // Resource hierarchy
-  resource_hierarchy: ResourceHierarchy | null;
+  resource_hierarchy?: ResourceHierarchy | null;
 }
 
 /**
@@ -1647,11 +1647,15 @@ export async function getCredentialNodes(): Promise<CredentialNode[]> {
       tracked_credential_id: (row.properties.tracked_credential_id as string) || null,
       // Credential metadata
       last_used_at: (row.properties.last_used_at as string) || null,
-      health_status: (row.properties.health_status as string) || "unknown",
+      health_status: (row.properties.health_status as HealthStatus) || null,
       health_checked_at: (row.properties.health_checked_at as string) || null,
-      scope: (row.properties.scope as string[]) || [],
-      // Resource hierarchy
-      resource_hierarchy: row.properties.resource_hierarchy || null,
+      scope: (row.properties.scope as string[]) || undefined,
+      // Resource hierarchy - ensure it has required fields or is null
+      resource_hierarchy: row.properties.resource_hierarchy &&
+        typeof row.properties.resource_hierarchy === 'object' &&
+        'resources' in row.properties.resource_hierarchy
+        ? (row.properties.resource_hierarchy as ResourceHierarchy)
+        : null,
     }));
   } catch (error) {
     console.error("[Supabase] Failed to get credential nodes:", error);

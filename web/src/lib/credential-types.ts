@@ -243,11 +243,11 @@ export interface CredentialNode {
   notes: string | null;
   api_docs_md: string | null;
   tracked_credential_id: string | null;
-  // Credential metadata
-  last_used_at: string | null;
-  health_status: HealthStatus;
-  health_checked_at: string | null;
-  scope: string[];
+  // Credential metadata (optional - may not be populated yet)
+  last_used_at?: string | null;
+  health_status?: HealthStatus | null;
+  health_checked_at?: string | null;
+  scope?: string[];
   // Resource hierarchy
   resource_hierarchy: ResourceHierarchy | null;
 }
