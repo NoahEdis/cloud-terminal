@@ -142,7 +142,7 @@ export function IntegrationTree({
         .replace(/\\t/g, '');
       return (
         <div
-          className="w-4 h-4 flex-shrink-0 [&_svg]:w-full [&_svg]:h-full [&_svg]:fill-current text-zinc-300"
+          className="h-3 w-auto flex-shrink-0 [&_svg]:h-full [&_svg]:w-auto [&_svg]:fill-current text-zinc-300"
           dangerouslySetInnerHTML={{ __html: unescapedSvg }}
         />
       );
@@ -152,11 +152,11 @@ export function IntegrationTree({
         <img
           src={app.icon_url}
           alt={app.name}
-          className="w-4 h-4 flex-shrink-0 rounded"
+          className="h-3 w-auto flex-shrink-0 rounded"
         />
       );
     }
-    return <Box className="w-4 h-4 text-zinc-500 flex-shrink-0" />;
+    return <Box className="h-3 w-3 text-zinc-500 flex-shrink-0" />;
   };
 
   if (loading) {
