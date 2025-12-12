@@ -29,6 +29,7 @@ import {
   MonitorSmartphone,
   Brain,
   Globe,
+  Sparkles,
 } from "lucide-react";
 import {
   listSessions,
@@ -163,6 +164,8 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
   const [geminiApiKey, setGeminiApiKey] = useState("");
   // Claude Code settings
   const [skipPermissions, setSkipPermissions] = useState(true);
+  // Codex CLI settings
+  const [codexFullAuto, setCodexFullAuto] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   // Directory picker state
@@ -224,12 +227,14 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
     const storedOpenaiKey = localStorage.getItem("openaiApiKey");
     const storedGeminiKey = localStorage.getItem("geminiApiKey");
     const storedSkipPermissions = localStorage.getItem("claudeSkipPermissions");
+    const storedCodexFullAuto = localStorage.getItem("codexFullAuto");
 
     setApiUrl(storedUrl || getDefaultApiUrl());
     setApiKey(storedKey ?? getDefaultApiKey());
     setOpenaiApiKey(storedOpenaiKey || "");
     setGeminiApiKey(storedGeminiKey || "");
     setSkipPermissions(storedSkipPermissions !== "false"); // Default to true
+    setCodexFullAuto(storedCodexFullAuto === "true"); // Default to false
     setLocalStorageLoaded(true);
 
     // Then load persisted settings from Supabase (overrides localStorage if available)
@@ -237,6 +242,7 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
       if (settings.openaiApiKey) setOpenaiApiKey(settings.openaiApiKey as string);
       if (settings.geminiApiKey) setGeminiApiKey(settings.geminiApiKey as string);
       if (settings.claudeSkipPermissions !== undefined) setSkipPermissions(settings.claudeSkipPermissions as boolean);
+      if (settings.codexFullAuto !== undefined) setCodexFullAuto(settings.codexFullAuto as boolean);
       // Note: API URL and API key are intentionally NOT synced from server
       // as they need to be local to connect to the server in the first place
     }).catch((err) => {
@@ -299,6 +305,8 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
       let autoRunCommand: string | undefined;
       if (newChatType === "claude") {
         autoRunCommand = skipPermissions ? "claude --dangerously-skip-permissions" : "claude";
+      } else if (newChatType === "codex") {
+        autoRunCommand = codexFullAuto ? "codex --full-auto" : "codex";
       }
 
       // Create session with optional auto-run command
@@ -525,6 +533,7 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
     localStorage.setItem("openaiApiKey", openaiApiKey);
     localStorage.setItem("geminiApiKey", geminiApiKey);
     localStorage.setItem("claudeSkipPermissions", skipPermissions.toString());
+    localStorage.setItem("codexFullAuto", codexFullAuto.toString());
 
     // Persist API keys and settings to Supabase for cross-device/deploy persistence
     try {
@@ -532,6 +541,7 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
         openaiApiKey,
         geminiApiKey,
         claudeSkipPermissions: skipPermissions,
+        codexFullAuto,
       });
     } catch (err) {
       console.error("Failed to persist settings:", err);
@@ -1161,6 +1171,32 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
                 </button>
                 <button
                   type="button"
+                  onClick={() => setNewChatType("codex")}
+                  className={`flex items-start gap-3 p-3 rounded border transition-colors text-left ${
+                    newChatType === "codex"
+                      ? "border-blue-600 bg-blue-950/30"
+                      : "border-zinc-800 hover:border-zinc-700 bg-zinc-900/50"
+                  }`}
+                >
+                  <div className={`p-1.5 rounded ${newChatType === "codex" ? "bg-blue-600" : "bg-zinc-800"}`}>
+                    <Sparkles className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12px] font-medium text-zinc-200">OpenAI Codex</span>
+                      {newChatType === "codex" && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-600/20 text-blue-400 border border-blue-600/30">
+                          Selected
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                      OpenAI's coding agent powered by GPT models
+                    </p>
+                  </div>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setNewChatType("custom")}
                   className={`flex items-start gap-3 p-3 rounded border transition-colors text-left ${
                     newChatType === "custom"
@@ -1205,6 +1241,29 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       skipPermissions ? "translate-x-[18px]" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </div>
+            )}
+
+            {/* Codex Settings - only show when Codex type selected */}
+            {newChatType === "codex" && (
+              <div className="flex items-center justify-between p-3 bg-zinc-900/50 rounded border border-zinc-800">
+                <div>
+                  <p className="text-[12px] text-zinc-200">Full Auto mode</p>
+                  <p className="text-[10px] text-zinc-500">Run with --full-auto to skip most prompts</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCodexFullAuto(!codexFullAuto)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                    codexFullAuto ? "bg-blue-600" : "bg-zinc-700"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      codexFullAuto ? "translate-x-[18px]" : "translate-x-1"
                     }`}
                   />
                 </button>
@@ -1426,6 +1485,32 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
                     <span
                       className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                         skipPermissions ? "translate-x-[18px]" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* OpenAI Codex Settings */}
+            <div className="border-t border-zinc-800 pt-4 mt-4">
+              <h4 className="text-[12px] font-medium text-zinc-300 mb-3">OpenAI Codex</h4>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-zinc-900/50 rounded border border-zinc-800">
+                  <div>
+                    <p className="text-[12px] text-zinc-200">Full Auto mode</p>
+                    <p className="text-[10px] text-zinc-500">Run with --full-auto to skip most prompts</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCodexFullAuto(!codexFullAuto)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                      codexFullAuto ? "bg-blue-600" : "bg-zinc-700"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                        codexFullAuto ? "translate-x-[18px]" : "translate-x-1"
                       }`}
                     />
                   </button>

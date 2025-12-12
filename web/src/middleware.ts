@@ -3,9 +3,11 @@ import { auth } from "@/auth";
 // Public routes that don't require authentication
 const PUBLIC_ROUTES = [
   "/api/auth",
+  "/api/browser",
   "/api/diagrams",
   "/api/graph",
   "/api/brain",
+  "/browser",
   "/brain",
   "/integrations",
   "/demo",

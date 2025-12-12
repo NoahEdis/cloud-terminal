@@ -1,6 +1,6 @@
 export type ActivityState = "idle" | "busy" | "exited";
 
-export type ChatType = "claude" | "custom";
+export type ChatType = "claude" | "codex" | "custom";
 
 // Task status for rich visual indicators
 export interface TaskStatus {
