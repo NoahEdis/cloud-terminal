@@ -27,6 +27,7 @@ import {
   formatResponseTime,
   type BrowserStatus,
   type ModelGroup,
+  type ModelInfo,
   type ActivityLogEntry,
   BrowserApiError,
 } from "@/lib/browser-api";
@@ -296,10 +297,10 @@ export default function BrowserPage() {
               <option value=":">No models available</option>
             )}
             {modelGroups.map((group) => (
-              <optgroup key={group.provider} label={group.provider}>
+              <optgroup key={group.provider} label={group.provider.charAt(0).toUpperCase() + group.provider.slice(1)}>
                 {group.models.map((m) => (
-                  <option key={`${m.provider}:${m.model}`} value={`${m.provider}:${m.model}`}>
-                    {m.label || m.model}
+                  <option key={`${m.provider}:${m.id}`} value={`${m.provider}:${m.id}`}>
+                    {m.name}
                   </option>
                 ))}
               </optgroup>
@@ -383,7 +384,32 @@ export default function BrowserPage() {
           </div>
           <ScrollArea className="flex-1">
             <div className="p-3 space-y-2">
-              {activityLog.length === 0 ? (
+              {connectionStatus === "disconnected" && activityLog.length === 0 ? (
+                <div className="py-6 px-4">
+                  <div className="max-w-md mx-auto">
+                    <div className="flex items-center gap-2 mb-4">
+                      <AlertCircle className="w-5 h-5 text-amber-400" />
+                      <h3 className="text-[14px] font-medium text-zinc-200">Browser Agent Server Not Running</h3>
+                    </div>
+                    <p className="text-[12px] text-zinc-400 mb-4">
+                      The browser agent server needs to be running locally to use this feature.
+                    </p>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 mb-4">
+                      <p className="text-[11px] text-zinc-500 mb-2">Start the server:</p>
+                      <code className="text-[12px] text-emerald-400 font-mono">
+                        npx tsx servers/browser-agent-chat/index.ts
+                      </code>
+                    </div>
+                    <div className="text-[11px] text-zinc-500 space-y-1">
+                      <p>Requirements:</p>
+                      <ul className="list-disc list-inside ml-2 space-y-0.5">
+                        <li>At least one LLM API key (Anthropic, OpenAI, etc.)</li>
+                        <li>Chrome/Chromium browser installed</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              ) : activityLog.length === 0 ? (
                 <div className="text-[12px] text-zinc-600 py-8 text-center">
                   No activity yet. Enter a task to get started.
                 </div>

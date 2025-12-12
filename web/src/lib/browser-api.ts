@@ -25,15 +25,23 @@ export interface BrowserConfig {
   headless: boolean;
 }
 
-export interface ModelOption {
+export interface ModelInfo {
+  id: string;
+  name: string;
   provider: string;
-  model: string;
-  label: string;
+  contextWindow: number;
+  inputCost: number;
+  outputCost: number;
+}
+
+export interface ModelsResponse {
+  models: ModelInfo[];
+  availableProviders: string[];
 }
 
 export interface ModelGroup {
   provider: string;
-  models: ModelOption[];
+  models: ModelInfo[];
 }
 
 export interface ActivityLogEntry {
@@ -72,7 +80,31 @@ export async function getBrowserStatus(): Promise<BrowserStatus> {
 
 export async function getAvailableModels(): Promise<ModelGroup[]> {
   const res = await fetch("/api/browser/models");
-  return handleResponse<ModelGroup[]>(res);
+  const data = await handleResponse<ModelsResponse>(res);
+
+  // Group models by provider, filtering to only available providers
+  const availableSet = new Set(data.availableProviders);
+  const groupMap = new Map<string, ModelInfo[]>();
+
+  for (const model of data.models) {
+    // Only include models from available providers
+    if (!availableSet.has(model.provider)) continue;
+
+    if (!groupMap.has(model.provider)) {
+      groupMap.set(model.provider, []);
+    }
+    groupMap.get(model.provider)!.push(model);
+  }
+
+  // Convert to array and sort providers
+  const providerOrder = ["anthropic", "openai", "gemini", "groq", "ollama"];
+  return Array.from(groupMap.entries())
+    .sort(([a], [b]) => {
+      const aIdx = providerOrder.indexOf(a);
+      const bIdx = providerOrder.indexOf(b);
+      return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
+    })
+    .map(([provider, models]) => ({ provider, models }));
 }
 
 export async function getBrowserConfig(): Promise<BrowserConfig> {
