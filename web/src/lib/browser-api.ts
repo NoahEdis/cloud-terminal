@@ -1,5 +1,5 @@
 // Browser Agent API Client
-// Communicates with the browser agent server via Next.js API proxy routes
+// Communicates with the browser agent server via Next.js API proxy routes and WebSocket
 
 export interface BrowserStatus {
   isRunning: boolean;
@@ -44,13 +44,129 @@ export interface ModelGroup {
   models: ModelInfo[];
 }
 
+// Activity log entry types - expanded for detailed logging
+export type ActivityLogType =
+  | "task_started"
+  | "step"
+  | "tool"
+  | "tool_result"
+  | "thinking"
+  | "assistant"
+  | "complete"
+  | "error"
+  | "user_input"
+  | "screenshot"
+  | "state_change";
+
 export interface ActivityLogEntry {
   id: string;
   timestamp: Date;
-  type: "task_started" | "step" | "tool" | "result" | "complete" | "error" | "user_input";
+  type: ActivityLogType;
   content: string;
   details?: Record<string, unknown>;
 }
+
+// WebSocket event types from browser agent server
+export interface WSToolCalledEvent {
+  type: "tool_called";
+  data: {
+    tool: string;
+    args: Record<string, unknown>;
+    reason?: string;
+  };
+}
+
+export interface WSToolResultEvent {
+  type: "tool_result";
+  data: {
+    tool: string;
+    result: unknown;
+    screenshot?: string; // base64 PNG
+    error?: string;
+  };
+}
+
+export interface WSLiveScreenshotEvent {
+  type: "live_screenshot";
+  data: {
+    screenshot: string; // base64 PNG
+    timestamp: number;
+  };
+}
+
+export interface WSStepStartedEvent {
+  type: "step_started";
+  data: {
+    step: number;
+    maxSteps: number;
+  };
+}
+
+export interface WSTaskStartedEvent {
+  type: "task_started";
+  data: {
+    task: string;
+    maxSteps: number;
+  };
+}
+
+export interface WSTaskCompletedEvent {
+  type: "task_completed";
+  data: {
+    success: boolean;
+    result?: string;
+    error?: string;
+  };
+}
+
+export interface WSAssistantMessageEvent {
+  type: "assistant_message";
+  data: {
+    content: string;
+  };
+}
+
+export interface WSAgentEventEvent {
+  type: "agent_event";
+  data: {
+    event: string;
+    details?: Record<string, unknown>;
+  };
+}
+
+export interface WSErrorEvent {
+  type: "error";
+  data: {
+    message: string;
+  };
+}
+
+export interface WSUserInputRequestEvent {
+  type: "user_input_request";
+  data: {
+    prompt: string;
+  };
+}
+
+export interface WSStateChangeEvent {
+  type: "state_change";
+  data: {
+    description: string;
+  };
+}
+
+export type BrowserWSEvent =
+  | WSToolCalledEvent
+  | WSToolResultEvent
+  | WSLiveScreenshotEvent
+  | WSStepStartedEvent
+  | WSTaskStartedEvent
+  | WSTaskCompletedEvent
+  | WSAssistantMessageEvent
+  | WSAgentEventEvent
+  | WSErrorEvent
+  | WSUserInputRequestEvent
+  | WSStateChangeEvent;
 
 export class BrowserApiError extends Error {
   constructor(
@@ -143,7 +259,7 @@ export async function sendUserInput(input: string): Promise<void> {
 
 // Helper to create activity log entry
 export function createActivityLogEntry(
-  type: ActivityLogEntry["type"],
+  type: ActivityLogType,
   content: string,
   details?: Record<string, unknown>
 ): ActivityLogEntry {
@@ -170,4 +286,38 @@ export function formatResponseTime(ms: number): string {
     return `${Math.round(ms)}ms`;
   }
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+// Get WebSocket URL for browser agent server
+// In development, connect directly to the browser agent server
+// In production, this would need a WebSocket proxy
+export function getBrowserAgentWSUrl(): string {
+  // For now, connect directly to the browser agent server
+  // This assumes the browser agent runs on the same host
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    return `ws://${host}:3456`;
+  }
+  return "ws://localhost:3456";
+}
+
+// Format tool arguments for display
+export function formatToolArgs(args: Record<string, unknown>): string {
+  const entries = Object.entries(args);
+  if (entries.length === 0) return "";
+
+  return entries
+    .map(([key, value]) => {
+      const valueStr = typeof value === "string"
+        ? value.length > 50 ? `"${value.slice(0, 50)}..."` : `"${value}"`
+        : JSON.stringify(value);
+      return `${key}: ${valueStr}`;
+    })
+    .join(", ");
+}
+
+// Truncate text for display
+export function truncateText(text: string, maxLength: number = 100): string {
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength) + "...";
 }
