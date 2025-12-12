@@ -93,26 +93,25 @@ export default function Home() {
   const audioChunksRef = useRef<Blob[]>([]);
   const sidebarRef = useRef<HTMLDivElement>(null);
 
-  // Auto-resize textarea up to max height (15 lines)
+  // Auto-resize textarea up to max height
   const adjustTextareaHeight = useCallback(() => {
     const textarea = inputRef.current;
     if (!textarea) return;
 
-    // Reset height to auto to get the correct scrollHeight
+    // Reset to auto to measure natural height
     textarea.style.height = "auto";
 
-    // Calculate max height (approximately 15 lines * line-height)
-    const lineHeight = 24; // ~1.5rem at 16px base
-    const maxLines = 15;
-    const padding = 20;
-    const maxHeight = (lineHeight * maxLines) + padding;
+    // Cap at maxHeight (200px)
+    const maxHeight = 200;
+    const scrollHeight = textarea.scrollHeight;
 
-    // Set the height to scrollHeight but cap at maxHeight
-    const newHeight = Math.min(textarea.scrollHeight, maxHeight);
-    textarea.style.height = `${newHeight}px`;
-
-    // Enable/disable overflow based on whether content exceeds max
-    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+    if (scrollHeight > maxHeight) {
+      textarea.style.height = `${maxHeight}px`;
+      textarea.style.overflowY = "auto";
+    } else {
+      textarea.style.height = `${scrollHeight}px`;
+      textarea.style.overflowY = "hidden";
+    }
   }, []);
 
   // Migrate localStorage keys and start connection health checking on mount
@@ -243,7 +242,8 @@ export default function Home() {
     e.preventDefault();
     if ((!command.trim() && pendingImages.length === 0) || !selectedSessionId) return;
 
-    const messageText = command.trim();
+    // Replace newlines with spaces to send as single message to Claude Code
+    const messageText = command.trim().replace(/\n+/g, " ");
     setUploadingImage(true);
     try {
       // Upload any pending images first
@@ -290,12 +290,10 @@ export default function Home() {
 
       setCommand("");
       setPendingImages([]);
-      // Reset textarea height after clearing
+      // Reset textarea to initial state
       if (inputRef.current) {
-        inputRef.current.style.height = "28px";
-        inputRef.current.style.overflowY = "hidden";
+        inputRef.current.style.height = "auto";
       }
-      inputRef.current?.blur();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to send message");
     } finally {
@@ -711,8 +709,8 @@ export default function Home() {
               </div>
             )}
 
-            {/* ChatGPT-style pill input */}
-            <form onSubmit={handleSendCommand}>
+            {/* ChatGPT-style input */}
+            <form onSubmit={handleSendCommand} className="max-w-3xl mx-auto">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -721,24 +719,24 @@ export default function Home() {
                 onChange={handleFileInputChange}
               />
 
-              {/* Pill container - flex row, vertically centered */}
-              <div className="flex items-center gap-2 bg-[#303030] border border-[#313131] rounded-full min-h-[84px] px-4 shadow-[0_0_0_1px_rgba(58,58,58,0.55)] focus-within:border-[#454545] transition-colors">
+              {/* Input container - rounded rectangle that maintains shape when expanded */}
+              <div className="flex items-center gap-3 bg-[#303030] border border-[#313131] rounded-3xl px-3 py-3 shadow-[0_0_0_1px_rgba(58,58,58,0.55)] focus-within:border-[#454545] transition-colors">
                 {/* Plus button (media upload) - transparent, large hit area */}
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={sessionStatus !== "running" || uploadingImage}
-                  className="flex-shrink-0 w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   title="Add media"
                 >
                   {uploadingImage ? (
-                    <Loader2 className="w-[22px] h-[22px] text-white/90 animate-spin" />
+                    <Loader2 className="w-5 h-5 text-white/90 animate-spin" />
                   ) : (
-                    <Plus className="w-[22px] h-[22px] text-white/90" />
+                    <Plus className="w-5 h-5 text-white/90" />
                   )}
                 </button>
 
-                {/* Textarea - flex-1, larger text */}
+                {/* Textarea - flex-1 */}
                 <textarea
                   ref={inputRef}
                   value={command}
@@ -756,18 +754,18 @@ export default function Home() {
                   placeholder="Ask anything"
                   disabled={sessionStatus !== "running"}
                   rows={1}
-                  className="flex-1 bg-transparent text-[18px] text-white placeholder-[#AFAFAF] focus:outline-none resize-none leading-6 disabled:opacity-50 disabled:cursor-not-allowed py-6"
-                  style={{ minHeight: "28px", maxHeight: "200px", overflowY: "hidden" }}
+                  className="flex-1 min-w-0 bg-transparent text-base text-white placeholder-[#AFAFAF] focus:outline-none resize-none leading-6 disabled:opacity-50 disabled:cursor-not-allowed overflow-y-auto"
+                  style={{ height: "auto", maxHeight: "200px" }}
                 />
 
                 {/* Right side controls */}
-                <div className="flex-shrink-0 flex items-center gap-2">
+                <div className="flex-shrink-0 flex items-center gap-1">
                   {/* Small mic button - transparent, for dictation */}
                   <button
                     type="button"
                     onClick={isRecording ? stopRecording : startRecording}
                     disabled={sessionStatus !== "running"}
-                    className={`w-11 h-11 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    className={`w-10 h-10 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       isRecording
                         ? "bg-red-600 hover:bg-red-500"
                         : "hover:bg-white/10"
@@ -775,24 +773,24 @@ export default function Home() {
                     title="Voice dictation"
                   >
                     {isRecording ? (
-                      <Square className="w-[18px] h-[18px] text-white" />
+                      <Square className="w-4 h-4 text-white" />
                     ) : (
-                      <Mic className="w-[20px] h-[20px] text-white/70" />
+                      <Mic className="w-5 h-5 text-white/70" />
                     )}
                   </button>
 
-                  {/* Primary action button - large white circle, icon swaps based on state */}
+                  {/* Primary action button - white circle, icon swaps based on state */}
                   <button
                     type={command.trim() || pendingImages.length > 0 ? "submit" : "button"}
                     onClick={command.trim() || pendingImages.length > 0 ? undefined : () => setVoiceChatOpen(true)}
                     disabled={sessionStatus !== "running"}
-                    className="w-14 h-14 flex items-center justify-center rounded-full bg-white hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="w-10 h-10 flex items-center justify-center rounded-full bg-white hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     title={command.trim() || pendingImages.length > 0 ? "Send message" : "Voice chat"}
                   >
                     {command.trim() || pendingImages.length > 0 ? (
-                      <ArrowUp className="w-6 h-6 text-black" />
+                      <ArrowUp className="w-5 h-5 text-black" />
                     ) : (
-                      <Headphones className="w-6 h-6 text-black" />
+                      <Headphones className="w-5 h-5 text-black" />
                     )}
                   </button>
                 </div>
