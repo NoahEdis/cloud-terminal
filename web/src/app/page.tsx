@@ -64,7 +64,7 @@ const VoiceChatDialog = dynamic(() => import("@/components/VoiceChatDialog"), { 
 
 type ViewMode = "terminal" | "messages" | "graph" | "canvas";
 
-const MIN_SIDEBAR_WIDTH = 200;
+const MIN_SIDEBAR_WIDTH = 288; // Match default to prevent content clipping
 const MAX_SIDEBAR_WIDTH = 500;
 const DEFAULT_SIDEBAR_WIDTH = 288; // 18rem = 288px (w-72)
 
