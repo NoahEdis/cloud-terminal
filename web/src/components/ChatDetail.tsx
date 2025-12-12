@@ -46,8 +46,31 @@ export default function ChatDetail({ chatId, onBack }: ChatDetailProps) {
   const [historyCopied, setHistoryCopied] = useState<"history" | "recap" | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imageUploaded, setImageUploaded] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-resize textarea up to max height (15 lines)
+  const adjustTextareaHeight = useCallback(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+
+    // Reset height to auto to get the correct scrollHeight
+    textarea.style.height = "auto";
+
+    // Calculate max height (approximately 15 lines * line-height)
+    // Using 1.5rem line-height, 15 lines = 22.5rem, plus padding
+    const lineHeight = 24; // ~1.5rem at 16px base
+    const maxLines = 15;
+    const padding = 20; // top + bottom padding
+    const maxHeight = (lineHeight * maxLines) + padding;
+
+    // Set the height to scrollHeight but cap at maxHeight
+    const newHeight = Math.min(textarea.scrollHeight, maxHeight);
+    textarea.style.height = `${newHeight}px`;
+
+    // Enable/disable overflow based on whether content exceeds max
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, []);
 
   // Capture and copy terminal history to clipboard
   const handleCaptureHistory = async (format: "plain" | "markdown") => {
@@ -176,6 +199,11 @@ export default function ChatDetail({ chatId, onBack }: ChatDetailProps) {
       // Using \n (newline) which works better than \r for most CLI tools
       await sendInput(sessionId, command + "\n");
       setCommand("");
+      // Reset textarea height after clearing
+      if (inputRef.current) {
+        inputRef.current.style.height = "44px";
+        inputRef.current.style.overflowY = "hidden";
+      }
       // Blur input on mobile to dismiss keyboard
       inputRef.current?.blur();
     } catch (e) {
@@ -611,24 +639,29 @@ export default function ChatDetail({ chatId, onBack }: ChatDetailProps) {
           </Tooltip>
 
           <div className="flex-1 relative">
-            <span className="absolute left-3 md:left-4 top-1/2 -translate-y-1/2 text-sm text-primary font-mono">
+            <span className="absolute left-3 md:left-4 top-3 text-sm text-primary font-mono">
               &gt;
             </span>
-            <Input
+            <textarea
               ref={inputRef}
-              type="text"
               value={command}
-              onChange={(e) => setCommand(e.target.value)}
+              onChange={(e) => {
+                setCommand(e.target.value);
+                adjustTextareaHeight();
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   handleSendCommand(e);
                 }
+                // Shift+Enter allows new line (default behavior)
               }}
               onPaste={handlePaste}
               placeholder="Type a command or paste an image..."
-              className="pl-7 md:pl-8 font-mono bg-background/50 text-base md:text-sm"
+              className="w-full pl-7 md:pl-8 pr-3 py-2.5 font-mono bg-background/50 text-base md:text-sm border border-input rounded-md resize-none leading-6 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={session.status !== "running"}
+              rows={1}
+              style={{ minHeight: "44px", maxHeight: "380px", overflowY: "hidden" }}
             />
           </div>
           <Button

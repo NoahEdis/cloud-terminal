@@ -407,3 +407,56 @@ tmuxApi.post("/sessions/:name/activity", async (c) => {
 
   return c.json({ success: true, state: body.state });
 });
+
+// Upload an image and return the file path for Claude Code
+// Images are saved to /tmp/cloud-terminal-images/ with UUID filenames
+// This allows pasting images into the terminal for Claude Code to process
+tmuxApi.post("/sessions/:name/upload-image", async (c) => {
+  const name = c.req.param("name");
+  const session = tmuxSessionManager.get(name);
+
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+
+  const body = await c.req.json<{ image: string; filename?: string }>();
+
+  if (!body.image) {
+    return c.json({ error: "image (base64 data URL) is required" }, 400);
+  }
+
+  // Parse base64 data URL
+  const match = body.image.match(/^data:image\/(\w+);base64,(.+)$/);
+  if (!match) {
+    return c.json({ error: "Invalid image format. Expected data URL: data:image/png;base64,..." }, 400);
+  }
+
+  const [, ext, base64Data] = match;
+  const buffer = Buffer.from(base64Data, "base64");
+
+  // Create images directory if it doesn't exist
+  const fs = await import("fs/promises");
+  const path = await import("path");
+  const crypto = await import("crypto");
+
+  const imageDir = "/tmp/cloud-terminal-images";
+  await fs.mkdir(imageDir, { recursive: true });
+
+  // Generate unique filename
+  const uuid = crypto.randomUUID();
+  const originalName = body.filename?.replace(/[^a-zA-Z0-9.-]/g, "_") || "image";
+  const filename = `${uuid}-${originalName}.${ext}`;
+  const filepath = path.join(imageDir, filename);
+
+  // Write image to file
+  await fs.writeFile(filepath, buffer);
+
+  console.log(`[Upload] Image saved: ${filepath} (${buffer.length} bytes)`);
+
+  return c.json({
+    success: true,
+    filepath,
+    size: buffer.length,
+    type: `image/${ext}`,
+  });
+});
