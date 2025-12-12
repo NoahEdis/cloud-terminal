@@ -1735,6 +1735,7 @@ export interface GitHubStatus {
 
 /**
  * Test GitHub connection with the stored PAT.
+ * Falls back to direct GitHub API test if backend is unreachable.
  */
 export async function testGitHubConnection(): Promise<GitHubStatus> {
   const pat = getGitHubPat();
@@ -1742,12 +1743,52 @@ export async function testGitHubConnection(): Promise<GitHubStatus> {
     return { connected: false, error: "No token configured" };
   }
 
+  // First try via backend (if available)
   try {
     const res = await fetch(`${getApiUrl()}/api/github/status`, {
       headers: githubHeaders(),
+      signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+    if (res.ok) {
+      return res.json();
+    }
+  } catch {
+    // Backend unreachable, fall through to direct test
+  }
+
+  // Fallback: Test directly against GitHub API
+  try {
+    const userRes = await fetch("https://api.github.com/user", {
+      headers: {
+        Authorization: `Bearer ${pat}`,
+        Accept: "application/vnd.github.v3+json",
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!userRes.ok) {
+      return {
+        connected: false,
+        error: userRes.status === 401 ? "Invalid token" : `API error: ${userRes.status}`,
+      };
+    }
+
+    const user = await userRes.json();
+
+    // Also check repo access
+    const repoRes = await fetch("https://api.github.com/repos/noahedis/new-mcp-structure", {
+      headers: {
+        Authorization: `Bearer ${pat}`,
+        Accept: "application/vnd.github.v3+json",
+      },
+    });
+
+    return {
+      connected: true,
+      user: user.login,
+      hasRepoAccess: repoRes.ok,
+      repo: "noahedis/new-mcp-structure",
+    };
   } catch (err) {
     return {
       connected: false,
@@ -1780,27 +1821,63 @@ export function getContextFilePath(folderName: string): string {
  */
 export async function getContextFile(folderName: string): Promise<ContextFileResponse> {
   const path = getContextFilePath(folderName);
+  const pat = getGitHubPat();
 
-  const res = await fetch(
-    `${getApiUrl()}/api/github/file?path=${encodeURIComponent(path)}`,
-    { headers: githubHeaders() }
-  );
+  // Try backend first
+  try {
+    const res = await fetch(
+      `${getApiUrl()}/api/github/file?path=${encodeURIComponent(path)}`,
+      { headers: githubHeaders(), signal: AbortSignal.timeout(5000) }
+    );
 
-  if (res.status === 404) {
+    if (res.status === 404) {
+      return { content: "", sha: "", lastModified: "", exists: false };
+    }
+
+    if (res.ok) {
+      return res.json();
+    }
+  } catch {
+    // Backend unreachable, fall through to direct GitHub API
+  }
+
+  // Fallback: Direct GitHub API
+  if (!pat) {
+    throw new Error("GitHub token not configured");
+  }
+
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/noahedis/cloud-terminal/contents/${encodeURIComponent(path)}?ref=main`,
+      {
+        headers: {
+          Authorization: `Bearer ${pat}`,
+          Accept: "application/vnd.github.v3+json",
+        },
+        signal: AbortSignal.timeout(10000),
+      }
+    );
+
+    if (res.status === 404) {
+      return { content: "", sha: "", lastModified: "", exists: false };
+    }
+
+    if (!res.ok) {
+      throw new Error(`GitHub API error: ${res.status}`);
+    }
+
+    const data = await res.json();
+    const content = atob(data.content.replace(/\n/g, ""));
+
     return {
-      content: "",
-      sha: "",
-      lastModified: "",
-      exists: false,
+      content,
+      sha: data.sha,
+      lastModified: data.sha,
+      exists: true,
     };
+  } catch (err) {
+    throw new Error(err instanceof Error ? err.message : "Failed to fetch file");
   }
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${res.status}`);
-  }
-
-  return res.json();
 }
 
 /**
@@ -1813,24 +1890,83 @@ export async function saveContextFile(
   sha?: string
 ): Promise<{ success: boolean; commitSha?: string; fileSha?: string; error?: string }> {
   const path = getContextFilePath(folderName);
+  const pat = getGitHubPat();
 
-  const res = await fetch(`${getApiUrl()}/api/github/commit`, {
-    method: "POST",
-    headers: githubHeaders(),
-    body: JSON.stringify({
-      path,
-      content,
-      message,
-      sha,
-    }),
-  });
+  // Try backend first
+  try {
+    const res = await fetch(`${getApiUrl()}/api/github/commit`, {
+      method: "POST",
+      headers: githubHeaders(),
+      body: JSON.stringify({ path, content, message, sha }),
+      signal: AbortSignal.timeout(15000),
+    });
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    return { success: false, error: err.error || `HTTP ${res.status}` };
+    if (res.ok) {
+      return res.json();
+    }
+
+    // If backend returns an error, try to parse it
+    if (res.status !== 0) {
+      const err = await res.json().catch(() => ({}));
+      // If it's a real error (not just connection), return it
+      if (err.error && !err.error.includes("fetch")) {
+        return { success: false, error: err.error };
+      }
+    }
+  } catch {
+    // Backend unreachable, fall through to direct GitHub API
   }
 
-  return res.json();
+  // Fallback: Direct GitHub API
+  if (!pat) {
+    return { success: false, error: "GitHub token not configured" };
+  }
+
+  try {
+    const contentBase64 = btoa(unescape(encodeURIComponent(content)));
+
+    const body: { message: string; content: string; branch: string; sha?: string } = {
+      message,
+      content: contentBase64,
+      branch: "main",
+    };
+
+    if (sha) {
+      body.sha = sha;
+    }
+
+    const res = await fetch(
+      `https://api.github.com/repos/noahedis/cloud-terminal/contents/${encodeURIComponent(path)}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${pat}`,
+          Accept: "application/vnd.github.v3+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
+      }
+    );
+
+    if (res.status === 409) {
+      return { success: false, error: "Conflict: file was modified. Please reload and try again." };
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return { success: false, error: err.message || `GitHub API error: ${res.status}` };
+    }
+
+    const data = await res.json();
+    return {
+      success: true,
+      commitSha: data.commit?.sha,
+      fileSha: data.content?.sha,
+    };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Failed to save file" };
+  }
 }
 
 /**
