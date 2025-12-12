@@ -235,13 +235,12 @@ api.get("/sessions/:id/task-status", (c) => {
 
 // Upload an image and return the file path for Claude Code
 // Images are saved to /tmp/cloud-terminal-images/ with UUID filenames
+// NOTE: Session validation is optional - we just need to save the file
 api.post("/sessions/:id/upload-image", async (c) => {
   const id = c.req.param("id");
-  const session = sessionManager.get(id);
 
-  if (!session) {
-    return c.json({ error: "Session not found" }, 404);
-  }
+  // Log the upload attempt (session may or may not exist)
+  console.log(`[Upload] Image upload requested for session: ${id}`);
 
   const body = await c.req.json<{ image: string; filename?: string }>();
 

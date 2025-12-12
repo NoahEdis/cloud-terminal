@@ -411,13 +411,12 @@ tmuxApi.post("/sessions/:name/activity", async (c) => {
 // Upload an image and return the file path for Claude Code
 // Images are saved to /tmp/cloud-terminal-images/ with UUID filenames
 // This allows pasting images into the terminal for Claude Code to process
+// NOTE: Session validation is optional - we just need to save the file
 tmuxApi.post("/sessions/:name/upload-image", async (c) => {
   const name = c.req.param("name");
-  const session = tmuxSessionManager.get(name);
 
-  if (!session) {
-    return c.json({ error: "Session not found" }, 404);
-  }
+  // Log the upload attempt (session may or may not exist)
+  console.log(`[Upload] Image upload requested for session: ${name}`);
 
   const body = await c.req.json<{ image: string; filename?: string }>();
 
