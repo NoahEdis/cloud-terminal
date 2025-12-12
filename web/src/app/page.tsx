@@ -546,12 +546,15 @@ export default function Home() {
       </header>
 
       {/* Main */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar - z-20 ensures it stays above content area */}
+      <div className="flex-1 flex overflow-hidden isolate">
+        {/* Sidebar - isolated stacking context with minWidth to prevent collapse */}
         <div
           ref={sidebarRef}
-          style={{ width: sidebarOpen ? sidebarWidth : 0 }}
-          className={`relative z-20 flex-shrink-0 border-r border-zinc-800 bg-black overflow-hidden ${
+          style={{
+            width: sidebarOpen ? sidebarWidth : 0,
+            minWidth: sidebarOpen ? sidebarWidth : 0
+          }}
+          className={`isolate z-20 flex-shrink-0 border-r border-zinc-800 bg-black overflow-hidden ${
             isResizing ? "" : "transition-all duration-200"
           } ${!sidebarOpen ? "border-r-0" : ""}`}
         >
@@ -564,14 +567,14 @@ export default function Home() {
         {sidebarOpen && (
           <div
             onMouseDown={handleMouseDown}
-            className={`relative z-30 w-1 hover:w-1.5 bg-transparent hover:bg-zinc-700 cursor-col-resize flex-shrink-0 transition-all ${
+            className={`z-30 w-1 hover:w-1.5 bg-transparent hover:bg-zinc-700 cursor-col-resize flex-shrink-0 transition-all ${
               isResizing ? "w-1.5 bg-zinc-600" : ""
             }`}
           />
         )}
 
-        {/* Content - z-10 ensures sidebar stays above it */}
-        <div className="relative z-10 flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Content - isolated stacking context, clips all children */}
+        <div className="isolate z-10 flex-1 flex flex-col min-w-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-hidden">
             {viewMode === "terminal" ? (
               selectedSessionId ? (
