@@ -547,15 +547,15 @@ export default function Home() {
 
       {/* Main */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar */}
+        {/* Sidebar - z-20 ensures it stays above content area */}
         <div
           ref={sidebarRef}
           style={{ width: sidebarOpen ? sidebarWidth : 0 }}
-          className={`flex-shrink-0 border-r border-zinc-800 bg-black overflow-hidden ${
+          className={`relative z-20 flex-shrink-0 border-r border-zinc-800 bg-black overflow-hidden ${
             isResizing ? "" : "transition-all duration-200"
           } ${!sidebarOpen ? "border-r-0" : ""}`}
         >
-          <div style={{ width: sidebarWidth }} className="h-full">
+          <div style={{ width: sidebarWidth }} className="h-full overflow-hidden">
             <ChatList selectedId={selectedSessionId} onSelect={handleSelectSession} />
           </div>
         </div>
@@ -564,14 +564,14 @@ export default function Home() {
         {sidebarOpen && (
           <div
             onMouseDown={handleMouseDown}
-            className={`w-1 hover:w-1.5 bg-transparent hover:bg-zinc-700 cursor-col-resize flex-shrink-0 transition-all ${
+            className={`relative z-30 w-1 hover:w-1.5 bg-transparent hover:bg-zinc-700 cursor-col-resize flex-shrink-0 transition-all ${
               isResizing ? "w-1.5 bg-zinc-600" : ""
             }`}
           />
         )}
 
-        {/* Content */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Content - z-10 ensures sidebar stays above it */}
+        <div className="relative z-10 flex-1 flex flex-col min-w-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-hidden">
             {viewMode === "terminal" ? (
               selectedSessionId ? (
