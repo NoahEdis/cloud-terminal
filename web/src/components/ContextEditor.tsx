@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Editor from "@monaco-editor/react";
 import ReactMarkdown from "react-markdown";
@@ -17,6 +17,7 @@ import {
   X,
   RefreshCw,
   Pencil,
+  GripVertical,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
@@ -54,6 +55,11 @@ export default function ContextEditor({ folderName }: ContextEditorProps) {
   // Commit dialog state
   const [showCommitDialog, setShowCommitDialog] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
+
+  // Resizable panel state
+  const [splitPosition, setSplitPosition] = useState(50); // percentage
+  const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Check if content has changed
   const hasChanges = content !== originalContent;
@@ -185,6 +191,42 @@ export default function ContextEditor({ folderName }: ContextEditorProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleSave, hasChanges, isNew]);
 
+  // Handle divider drag
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging || !containerRef.current) return;
+
+      const rect = containerRef.current.getBoundingClientRect();
+      const newPosition = ((e.clientX - rect.left) / rect.width) * 100;
+
+      // Clamp between 20% and 80%
+      setSplitPosition(Math.min(80, Math.max(20, newPosition)));
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    }
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isDragging]);
+
   // Loading state
   if (loading) {
     return (
@@ -314,40 +356,84 @@ export default function ContextEditor({ folderName }: ContextEditorProps) {
       )}
 
       {/* Editor content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div ref={containerRef} className="flex-1 flex overflow-hidden">
         {/* Editor pane */}
         {(viewMode === "edit" || viewMode === "split") && (
-          <div className={`${viewMode === "split" ? "w-1/2 border-r border-zinc-800" : "w-full"}`}>
-            <Editor
-              height="100%"
-              defaultLanguage="markdown"
-              value={content}
-              onChange={(value) => setContent(value || "")}
-              theme="vs-dark"
-              options={{
-                minimap: { enabled: false },
-                fontSize: 13,
-                lineHeight: 1.6,
-                padding: { top: 16, bottom: 16 },
-                wordWrap: "on",
-                scrollBeyondLastLine: false,
-                fontFamily: "var(--font-geist-mono), monospace",
-                renderLineHighlight: "none",
-                lineNumbers: "off",
-                folding: false,
-                glyphMargin: false,
-                lineDecorationsWidth: 0,
-                lineNumbersMinChars: 0,
-              }}
-            />
+          <div
+            className="flex flex-col min-w-0 bg-zinc-950"
+            style={{ width: viewMode === "split" ? `${splitPosition}%` : "100%" }}
+          >
+            {/* Editor header */}
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800/50 bg-zinc-900/30">
+              <Code className="w-3.5 h-3.5 text-zinc-500" />
+              <span className="text-[11px] text-zinc-500 uppercase tracking-wider">Editor</span>
+            </div>
+            {/* Editor wrapper with horizontal padding */}
+            <div className="flex-1 overflow-hidden">
+              <Editor
+                height="100%"
+                defaultLanguage="markdown"
+                value={content}
+                onChange={(value) => setContent(value || "")}
+                theme="vs-dark"
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 13,
+                  lineHeight: 1.7,
+                  padding: { top: 20, bottom: 20 },
+                  wordWrap: "on",
+                  scrollBeyondLastLine: false,
+                  fontFamily: "var(--font-geist-mono), monospace",
+                  renderLineHighlight: "none",
+                  lineNumbers: "off",
+                  folding: false,
+                  glyphMargin: false,
+                  lineDecorationsWidth: 24,
+                  lineNumbersMinChars: 0,
+                  scrollbar: {
+                    vertical: "auto",
+                    horizontal: "hidden",
+                    verticalScrollbarSize: 8,
+                  },
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Resizable divider */}
+        {viewMode === "split" && (
+          <div
+            className={`relative flex-shrink-0 w-1 group cursor-col-resize ${
+              isDragging ? "bg-blue-500/50" : "bg-zinc-800 hover:bg-zinc-700"
+            } transition-colors`}
+            onMouseDown={handleMouseDown}
+          >
+            {/* Drag handle indicator */}
+            <div className={`absolute inset-y-0 -left-1 -right-1 flex items-center justify-center ${
+              isDragging ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+            } transition-opacity`}>
+              <div className="flex items-center justify-center w-4 h-8 rounded bg-zinc-700/80">
+                <GripVertical className="w-3 h-3 text-zinc-400" />
+              </div>
+            </div>
           </div>
         )}
 
         {/* Preview pane */}
         {(viewMode === "preview" || viewMode === "split") && (
-          <div className={`${viewMode === "split" ? "w-1/2" : "w-full"}`}>
-            <ScrollArea className="h-full">
-              <div className="p-6 prose prose-invert prose-zinc max-w-none">
+          <div
+            className="flex flex-col min-w-0 bg-black"
+            style={{ width: viewMode === "split" ? `${100 - splitPosition}%` : "100%" }}
+          >
+            {/* Preview header */}
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800/50 bg-zinc-900/30">
+              <Eye className="w-3.5 h-3.5 text-zinc-500" />
+              <span className="text-[11px] text-zinc-500 uppercase tracking-wider">Preview</span>
+            </div>
+            {/* Preview content */}
+            <ScrollArea className="flex-1">
+              <div className="px-8 py-6 prose prose-invert prose-zinc max-w-none prose-headings:font-medium prose-h1:text-xl prose-h1:border-b prose-h1:border-zinc-800 prose-h1:pb-3 prose-h2:text-lg prose-h2:mt-8 prose-h3:text-base prose-p:text-zinc-300 prose-p:leading-relaxed prose-code:text-zinc-300 prose-code:bg-zinc-800/50 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800 prose-a:text-blue-400 prose-strong:text-zinc-200 prose-li:text-zinc-300">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
               </div>
             </ScrollArea>
