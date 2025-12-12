@@ -24,6 +24,7 @@ import {
   Headphones,
   Copy,
   Check,
+  RotateCw,
 } from "lucide-react";
 import {
   listSessions,
@@ -39,6 +40,7 @@ import {
   generateChatTitle,
   hasAutoTitleBeenAttempted,
   markAutoTitleAttempted,
+  restartBackend,
   type ConnectionStatus,
   type WindowInfoResponse,
 } from "@/lib/api";
@@ -79,6 +81,7 @@ export default function Home() {
   const [voiceChatOpen, setVoiceChatOpen] = useState(false);
   const [windowInfo, setWindowInfo] = useState<WindowInfoResponse | null>(null);
   const [copiedSessionId, setCopiedSessionId] = useState(false);
+  const [isRestarting, setIsRestarting] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -412,6 +415,22 @@ export default function Home() {
       console.error("Failed to copy session ID:", err);
     }
   }, [selectedSessionId]);
+
+  const handleRestart = useCallback(async () => {
+    if (isRestarting) return;
+    setIsRestarting(true);
+    try {
+      await restartBackend();
+      // Backend will restart, connection will drop temporarily
+      // The connectionManager health check will handle reconnection
+    } catch (err) {
+      console.error("Failed to restart backend:", err);
+      setError(err instanceof Error ? err.message : "Failed to restart backend");
+    } finally {
+      // Reset after a delay to allow for restart
+      setTimeout(() => setIsRestarting(false), 3000);
+    }
+  }, [isRestarting]);
 
   const currentSession = sessions.find(s => getSessionId(s) === selectedSessionId);
 
@@ -793,14 +812,24 @@ export default function Home() {
         }}
       />
 
-      {/* Version indicator - click to view changelog */}
-      <Link
-        href="/changelog"
-        className="fixed bottom-3 left-3 px-2 py-0.5 rounded bg-zinc-900/90 border border-zinc-800/60 text-[10px] text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 font-mono z-50 transition-colors"
-        title="View changelog"
-      >
-        v{packageJson.version}
-      </Link>
+      {/* Version indicator and restart button */}
+      <div className="fixed bottom-3 left-3 flex items-center gap-1.5 z-50">
+        <Link
+          href="/changelog"
+          className="px-2 py-0.5 rounded bg-zinc-900/90 border border-zinc-800/60 text-[10px] text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 font-mono transition-colors"
+          title="View changelog"
+        >
+          v{packageJson.version}
+        </Link>
+        <button
+          onClick={handleRestart}
+          disabled={isRestarting}
+          className="p-1 rounded bg-zinc-900/90 border border-zinc-800/60 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          title="Restart backend server"
+        >
+          <RotateCw className={`w-3 h-3 ${isRestarting ? "animate-spin" : ""}`} />
+        </button>
+      </div>
     </div>
   );
 }

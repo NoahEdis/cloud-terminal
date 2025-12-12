@@ -634,6 +634,19 @@ export async function uploadImage(
   return res.json();
 }
 
+// Restart the backend server
+export async function restartBackend(): Promise<{ success: boolean; message: string }> {
+  const res = await fetch(`${getApiUrl()}/api/restart`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // Folder documentation files storage
 const FOLDER_DOC_FILES_KEY = "terminal_folder_doc_files";
 

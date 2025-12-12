@@ -283,3 +283,24 @@ api.post("/sessions/:id/upload-image", async (c) => {
     type: `image/${ext}`,
   });
 });
+
+// Restart the backend server
+// This endpoint triggers a graceful shutdown and relies on a process manager
+// (like launchd or pm2) to restart the server automatically
+api.post("/restart", async (c) => {
+  console.log("[Server] Restart requested via API");
+
+  // Send response before exiting
+  const response = c.json({
+    success: true,
+    message: "Server is restarting...",
+  });
+
+  // Schedule the exit after response is sent
+  setTimeout(() => {
+    console.log("[Server] Exiting for restart...");
+    process.exit(0);
+  }, 500);
+
+  return response;
+});
