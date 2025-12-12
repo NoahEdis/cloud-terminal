@@ -2124,3 +2124,230 @@ export async function getAvailableModels(): Promise<AIModel[]> {
     ];
   }
 }
+
+// ============================================================================
+// API Documentation Files (GitHub sync)
+// ============================================================================
+
+/**
+ * Get the path for an application's API docs.
+ */
+export function getAppApiDocsPath(appSlug: string): string {
+  const safeName = appSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
+  return `cloud-terminal/api-docs/${safeName}/README.md`;
+}
+
+/**
+ * Get the path for a credential's API docs.
+ */
+export function getCredentialApiDocsPath(appSlug: string, credentialId: string): string {
+  const safeAppName = appSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const safeCredId = credentialId.replace(/[^a-zA-Z0-9_-]/g, "-");
+  return `cloud-terminal/api-docs/${safeAppName}/credentials/${safeCredId}.md`;
+}
+
+/**
+ * Fetch API docs file from GitHub.
+ */
+export async function getApiDocsFile(
+  type: "application" | "credential",
+  appSlug: string,
+  credentialId?: string
+): Promise<ContextFileResponse> {
+  const path = type === "application"
+    ? getAppApiDocsPath(appSlug)
+    : getCredentialApiDocsPath(appSlug, credentialId!);
+
+  const pat = getGitHubPat();
+
+  // Try backend first
+  try {
+    const res = await fetch(
+      `${getApiUrl()}/api/github/file?path=${encodeURIComponent(path)}`,
+      { headers: githubHeaders(), signal: AbortSignal.timeout(5000) }
+    );
+
+    if (res.status === 404) {
+      return { content: "", sha: "", lastModified: "", exists: false };
+    }
+
+    if (res.ok) {
+      return res.json();
+    }
+  } catch {
+    // Backend unreachable, fall through to direct GitHub API
+  }
+
+  // Fallback: Direct GitHub API
+  if (!pat) {
+    throw new Error("GitHub token not configured");
+  }
+
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/noahedis/new-mcp-structure/contents/${encodeURIComponent(path)}?ref=main`,
+      {
+        headers: {
+          Authorization: `Bearer ${pat}`,
+          Accept: "application/vnd.github.v3+json",
+        },
+        signal: AbortSignal.timeout(10000),
+      }
+    );
+
+    if (res.status === 404) {
+      return { content: "", sha: "", lastModified: "", exists: false };
+    }
+
+    if (!res.ok) {
+      throw new Error(`GitHub API error: ${res.status}`);
+    }
+
+    const data = await res.json();
+    const content = atob(data.content.replace(/\n/g, ""));
+
+    return {
+      content,
+      sha: data.sha,
+      lastModified: data.sha,
+      exists: true,
+    };
+  } catch (err) {
+    throw new Error(err instanceof Error ? err.message : "Failed to fetch file");
+  }
+}
+
+/**
+ * Save API docs file to GitHub.
+ */
+export async function saveApiDocsFile(
+  type: "application" | "credential",
+  appSlug: string,
+  content: string,
+  message: string,
+  sha?: string,
+  credentialId?: string
+): Promise<{ success: boolean; commitSha?: string; fileSha?: string; error?: string }> {
+  const path = type === "application"
+    ? getAppApiDocsPath(appSlug)
+    : getCredentialApiDocsPath(appSlug, credentialId!);
+
+  const pat = getGitHubPat();
+
+  // Try backend first
+  try {
+    const res = await fetch(`${getApiUrl()}/api/github/commit`, {
+      method: "POST",
+      headers: githubHeaders(),
+      body: JSON.stringify({ path, content, message, sha }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (res.ok) {
+      return res.json();
+    }
+
+    // If backend returns an error, try to parse it
+    if (res.status !== 0) {
+      const err = await res.json().catch(() => ({}));
+      if (err.error && !err.error.includes("fetch")) {
+        return { success: false, error: err.error };
+      }
+    }
+  } catch {
+    // Backend unreachable, fall through to direct GitHub API
+  }
+
+  // Fallback: Direct GitHub API
+  if (!pat) {
+    return { success: false, error: "GitHub token not configured" };
+  }
+
+  try {
+    const contentBase64 = btoa(unescape(encodeURIComponent(content)));
+
+    const body: { message: string; content: string; branch: string; sha?: string } = {
+      message,
+      content: contentBase64,
+      branch: "main",
+    };
+
+    if (sha) {
+      body.sha = sha;
+    }
+
+    const res = await fetch(
+      `https://api.github.com/repos/noahedis/new-mcp-structure/contents/${encodeURIComponent(path)}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${pat}`,
+          Accept: "application/vnd.github.v3+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
+      }
+    );
+
+    if (res.status === 409) {
+      return { success: false, error: "Conflict: file was modified. Please reload and try again." };
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return { success: false, error: err.message || `GitHub API error: ${res.status}` };
+    }
+
+    const data = await res.json();
+    return {
+      success: true,
+      commitSha: data.commit?.sha,
+      fileSha: data.content?.sha,
+    };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Failed to save file" };
+  }
+}
+
+/**
+ * Get the default template for application API docs.
+ */
+export function getAppApiDocsTemplate(appName: string): string {
+  return `# ${appName} API Documentation
+
+## Overview
+<!-- Brief description of this application's API -->
+
+## Authentication
+<!-- How to authenticate with this API -->
+
+## Endpoints
+<!-- Document important API endpoints -->
+
+## Rate Limits
+<!-- Any rate limiting information -->
+
+## Notes
+<!-- Additional notes, quirks, or tips -->
+`;
+}
+
+/**
+ * Get the default template for credential API docs.
+ */
+export function getCredentialApiDocsTemplate(credentialName: string, appName: string): string {
+  return `# ${credentialName}
+
+## Credential for ${appName}
+
+### Scope / Permissions
+<!-- What this credential can access -->
+
+### Usage Examples
+<!-- Code snippets showing how to use this credential -->
+
+### Notes
+<!-- Any notes specific to this credential -->
+`;
+}

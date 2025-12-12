@@ -31,6 +31,20 @@ function isValidContextPath(path: string): boolean {
   return pattern.test(path);
 }
 
+// Helper to validate API docs paths
+function isValidApiDocsPath(path: string): boolean {
+  // Application-level docs: cloud-terminal/api-docs/{app-slug}/README.md
+  const appPattern = /^cloud-terminal\/api-docs\/[a-zA-Z0-9_-]+\/README\.md$/;
+  // Credential-level docs: cloud-terminal/api-docs/{app-slug}/credentials/{credential-id}.md
+  const credPattern = /^cloud-terminal\/api-docs\/[a-zA-Z0-9_-]+\/credentials\/[a-zA-Z0-9_-]+\.md$/;
+  return appPattern.test(path) || credPattern.test(path);
+}
+
+// Helper to validate any allowed GitHub file path
+function isValidFilePath(path: string): boolean {
+  return isValidContextPath(path) || isValidApiDocsPath(path);
+}
+
 // ============================================================================
 // GitHub File Operations
 // ============================================================================
@@ -52,8 +66,10 @@ githubApi.get("/file", async (c) => {
     return c.json({ error: "path query parameter required" }, 400);
   }
 
-  if (!isValidContextPath(path)) {
-    return c.json({ error: "Invalid path. Must be cloud-terminal/projects/<folder>/CONTEXT.md" }, 400);
+  if (!isValidFilePath(path)) {
+    return c.json({
+      error: "Invalid path. Must be one of: cloud-terminal/projects/<folder>/CONTEXT.md, cloud-terminal/api-docs/<app>/README.md, or cloud-terminal/api-docs/<app>/credentials/<id>.md"
+    }, 400);
   }
 
   try {
@@ -120,8 +136,10 @@ githubApi.post("/commit", async (c) => {
       return c.json({ error: "path, content, and message are required" }, 400);
     }
 
-    if (!isValidContextPath(body.path)) {
-      return c.json({ error: "Invalid path. Must be cloud-terminal/projects/<folder>/CONTEXT.md" }, 400);
+    if (!isValidFilePath(body.path)) {
+      return c.json({
+        error: "Invalid path. Must be one of: cloud-terminal/projects/<folder>/CONTEXT.md, cloud-terminal/api-docs/<app>/README.md, or cloud-terminal/api-docs/<app>/credentials/<id>.md"
+      }, 400);
     }
 
     // Encode content to base64
@@ -275,7 +293,7 @@ githubApi.post("/generate-commit-message", async (c) => {
 
     // Build the prompt
     const prompt = isCreate
-      ? `Generate a concise git commit message for creating a new project context file.
+      ? `Generate a concise git commit message for creating a new markdown file (could be project context or API documentation).
 
 The file content is:
 \`\`\`markdown
@@ -285,10 +303,10 @@ ${newContent}
 Requirements:
 - One line, max 72 characters
 - Start with a verb (Add, Create, Initialize)
-- Be specific about what the context file documents
+- Be specific about what the file documents
 - Do not include quotes or markdown formatting in your response
 - Just return the commit message text directly`
-      : `Generate a concise git commit message for updating a project context file.
+      : `Generate a concise git commit message for updating a markdown file (could be project context or API documentation).
 
 Previous content:
 \`\`\`markdown

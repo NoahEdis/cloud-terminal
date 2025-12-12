@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -11,13 +11,24 @@ import {
   Search,
   X,
   FileText,
+  Edit3,
+  FolderTree,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { getIntegrationHierarchy } from "@/lib/api";
+import {
+  getIntegrationHierarchy,
+  getApiDocsFile,
+  saveApiDocsFile,
+  generateCommitMessage,
+  getAppApiDocsTemplate,
+  getCredentialApiDocsTemplate,
+} from "@/lib/api";
 import { CopyableBadge } from "@/components/CopyableBadge";
 import { HealthStatusBadge } from "@/components/HealthStatusBadge";
 import { OnePasswordLink, OP_ACCOUNTS } from "@/components/OnePasswordLink";
+import { ApiDocsEditor } from "@/components/ApiDocsEditor";
+import { ResourceHierarchyTree } from "@/components/ResourceHierarchyTree";
 import type {
   IntegrationHierarchy,
   ApplicationNode,
@@ -32,6 +43,17 @@ interface IntegrationTreeProps {
   onShowDocs?: (markdown: string, title: string) => void;
 }
 
+interface DocsEditorState {
+  open: boolean;
+  type: "application" | "credential";
+  appSlug: string;
+  appName: string;
+  credentialId?: string;
+  credentialName?: string;
+  initialContent: string;
+  sha?: string;
+}
+
 export function IntegrationTree({
   onSelectApp,
   onSelectOrg,
@@ -44,6 +66,14 @@ export function IntegrationTree({
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedApps, setExpandedApps] = useState<Set<string>>(new Set());
   const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
+  const [expandedCreds, setExpandedCreds] = useState<Set<string>>(new Set());
+  const [docsEditor, setDocsEditor] = useState<DocsEditorState>({
+    open: false,
+    type: "application",
+    appSlug: "",
+    appName: "",
+    initialContent: "",
+  });
 
   useEffect(() => {
     loadHierarchy();
@@ -134,6 +164,98 @@ export function IntegrationTree({
       return next;
     });
   };
+
+  const toggleCred = (id: string) => {
+    setExpandedCreds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // Open docs editor for an application
+  const openAppDocsEditor = useCallback(async (app: ApplicationNode) => {
+    try {
+      const file = await getApiDocsFile("application", app.name);
+      setDocsEditor({
+        open: true,
+        type: "application",
+        appSlug: app.name,
+        appName: app.name,
+        initialContent: file.exists ? file.content : getAppApiDocsTemplate(app.name),
+        sha: file.exists ? file.sha : undefined,
+      });
+    } catch (err) {
+      console.error("Failed to load app docs:", err);
+      // Open with template if fetch fails
+      setDocsEditor({
+        open: true,
+        type: "application",
+        appSlug: app.name,
+        appName: app.name,
+        initialContent: getAppApiDocsTemplate(app.name),
+      });
+    }
+  }, []);
+
+  // Open docs editor for a credential
+  const openCredDocsEditor = useCallback(async (cred: CredentialNode, appName: string) => {
+    try {
+      const file = await getApiDocsFile("credential", appName, cred.id);
+      setDocsEditor({
+        open: true,
+        type: "credential",
+        appSlug: appName,
+        appName: appName,
+        credentialId: cred.id,
+        credentialName: cred.name,
+        initialContent: file.exists ? file.content : getCredentialApiDocsTemplate(cred.name, appName),
+        sha: file.exists ? file.sha : undefined,
+      });
+    } catch (err) {
+      console.error("Failed to load credential docs:", err);
+      setDocsEditor({
+        open: true,
+        type: "credential",
+        appSlug: appName,
+        appName: appName,
+        credentialId: cred.id,
+        credentialName: cred.name,
+        initialContent: getCredentialApiDocsTemplate(cred.name, appName),
+      });
+    }
+  }, []);
+
+  // Save docs to GitHub
+  const handleSaveDocs = useCallback(async (content: string, commitMessage: string): Promise<boolean> => {
+    try {
+      const result = await saveApiDocsFile(
+        docsEditor.type,
+        docsEditor.appSlug,
+        content,
+        commitMessage,
+        docsEditor.sha,
+        docsEditor.credentialId
+      );
+      return result.success;
+    } catch (err) {
+      console.error("Failed to save docs:", err);
+      return false;
+    }
+  }, [docsEditor]);
+
+  // Generate commit message for docs changes
+  const handleGenerateCommitMessage = useCallback(async (oldContent: string, newContent: string): Promise<string> => {
+    return generateCommitMessage(oldContent, newContent);
+  }, []);
+
+  const closeDocsEditor = useCallback(() => {
+    setDocsEditor((prev) => ({ ...prev, open: false }));
+  }, []);
 
   const renderAppIcon = (app: ApplicationNode) => {
     if (app.svg_logo) {
@@ -273,15 +395,24 @@ export function IntegrationTree({
                       {credCount} credential{credCount !== 1 ? "s" : ""}
                     </span>
                   </button>
-                  {app.api_docs_md && (
+                  <div className="flex items-center">
+                    {app.api_docs_md && (
+                      <button
+                        onClick={() => onShowDocs?.(app.api_docs_md!, app.name)}
+                        className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                        title="View API docs"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button
-                      onClick={() => onShowDocs?.(app.api_docs_md!, app.name)}
-                      className="p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
-                      title="View API docs"
+                      onClick={() => openAppDocsEditor(app)}
+                      className="p-2 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                      title="Edit API docs"
                     >
-                      <FileText className="w-3.5 h-3.5" />
+                      <Edit3 className="w-3.5 h-3.5" />
                     </button>
-                  )}
+                  </div>
                 </div>
 
                 {/* Organizations */}
@@ -335,50 +466,88 @@ export function IntegrationTree({
                                 const opAccountId = org.op_account_id || OP_ACCOUNTS[org.name]?.accountId;
                                 const opHost = org.op_host || OP_ACCOUNTS[org.name]?.host;
                                 const canShow1PLink = cred.item_id && org.vault_id && opAccountId && opHost;
+                                const hasResources = (cred.resource_hierarchy?.resources?.length ?? 0) > 0;
+                                const isCredExpanded = expandedCreds.has(cred.id);
 
                                 return (
-                                  <div
-                                    key={cred.id}
-                                    className="flex items-center gap-2 px-2 py-1 rounded hover:bg-zinc-800/30 transition-colors group"
-                                  >
-                                    <HealthStatusBadge
-                                      status={cred.health_status}
-                                      checkedAt={cred.health_checked_at}
-                                    />
-                                    <Key className="w-3 h-3 text-zinc-600" />
-                                    <span
-                                      className="text-[11px] text-zinc-500 truncate cursor-pointer hover:text-zinc-400"
-                                      onClick={() => onSelectCredential?.(cred)}
-                                    >
-                                      {cred.name}
-                                    </span>
-                                    <CopyableBadge value={cred.id} truncate={8} />
-                                    {cred.service_name && (
-                                      <span className="text-[9px] px-1 py-0.5 rounded bg-zinc-800/50 text-zinc-600">
-                                        {cred.service_name}
-                                      </span>
-                                    )}
-                                    <div className="flex items-center gap-1 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-                                      {canShow1PLink && (
-                                        <OnePasswordLink
-                                          accountId={opAccountId!}
-                                          vaultId={org.vault_id!}
-                                          itemId={cred.item_id!}
-                                          host={opHost!}
-                                        />
-                                      )}
-                                      {cred.api_docs_md && (
+                                  <div key={cred.id}>
+                                    <div className="flex items-center gap-2 px-2 py-1 rounded hover:bg-zinc-800/30 transition-colors group">
+                                      {/* Expand toggle for resources */}
+                                      {hasResources ? (
                                         <button
-                                          onClick={() =>
-                                            onShowDocs?.(cred.api_docs_md!, cred.name)
-                                          }
-                                          className="p-1 text-zinc-600 hover:text-zinc-400"
-                                          title="View API docs"
+                                          onClick={() => toggleCred(cred.id)}
+                                          className="text-zinc-600 hover:text-zinc-400"
                                         >
-                                          <FileText className="w-3 h-3" />
+                                          {isCredExpanded ? (
+                                            <ChevronDown className="w-3 h-3" />
+                                          ) : (
+                                            <ChevronRight className="w-3 h-3" />
+                                          )}
                                         </button>
+                                      ) : (
+                                        <span className="w-3" />
                                       )}
+                                      <HealthStatusBadge
+                                        status={cred.health_status}
+                                        checkedAt={cred.health_checked_at}
+                                      />
+                                      <Key className="w-3 h-3 text-zinc-600" />
+                                      <span
+                                        className="text-[11px] text-zinc-500 truncate cursor-pointer hover:text-zinc-400"
+                                        onClick={() => onSelectCredential?.(cred)}
+                                      >
+                                        {cred.name}
+                                      </span>
+                                      <CopyableBadge value={cred.id} truncate={8} />
+                                      {cred.service_name && (
+                                        <span className="text-[9px] px-1 py-0.5 rounded bg-zinc-800/50 text-zinc-600">
+                                          {cred.service_name}
+                                        </span>
+                                      )}
+                                      {hasResources && (
+                                        <span className="text-[9px] px-1 py-0.5 rounded bg-blue-500/10 text-blue-400">
+                                          <FolderTree className="w-2.5 h-2.5 inline mr-0.5" />
+                                          resources
+                                        </span>
+                                      )}
+                                      <div className="flex items-center gap-1 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                                        {canShow1PLink && (
+                                          <OnePasswordLink
+                                            accountId={opAccountId!}
+                                            vaultId={org.vault_id!}
+                                            itemId={cred.item_id!}
+                                            host={opHost!}
+                                          />
+                                        )}
+                                        {cred.api_docs_md && (
+                                          <button
+                                            onClick={() =>
+                                              onShowDocs?.(cred.api_docs_md!, cred.name)
+                                            }
+                                            className="p-1 text-zinc-600 hover:text-zinc-400"
+                                            title="View API docs"
+                                          >
+                                            <FileText className="w-3 h-3" />
+                                          </button>
+                                        )}
+                                        <button
+                                          onClick={() => openCredDocsEditor(cred, app.name)}
+                                          className="p-1 text-zinc-600 hover:text-zinc-400"
+                                          title="Edit API docs"
+                                        >
+                                          <Edit3 className="w-3 h-3" />
+                                        </button>
+                                      </div>
                                     </div>
+                                    {/* Resource hierarchy */}
+                                    {isCredExpanded && hasResources && (
+                                      <div className="ml-8 pl-4 py-2 border-l border-zinc-800/50">
+                                        <ResourceHierarchyTree
+                                          hierarchy={cred.resource_hierarchy!}
+                                          className="text-[10px]"
+                                        />
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               })}
@@ -394,6 +563,20 @@ export function IntegrationTree({
           })}
         </div>
       </ScrollArea>
+
+      {/* API Docs Editor Modal */}
+      <ApiDocsEditor
+        open={docsEditor.open}
+        onClose={closeDocsEditor}
+        title={
+          docsEditor.type === "application"
+            ? docsEditor.appName
+            : `${docsEditor.credentialName} (${docsEditor.appName})`
+        }
+        initialContent={docsEditor.initialContent}
+        onSave={handleSaveDocs}
+        generateCommitMessage={handleGenerateCommitMessage}
+      />
     </div>
   );
 }
