@@ -134,10 +134,16 @@ export function IntegrationTree({
 
   const renderAppIcon = (app: ApplicationNode) => {
     if (app.svg_logo) {
+      // Unescape double-escaped quotes from database storage
+      const unescapedSvg = app.svg_logo
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, '')
+        .replace(/\\r/g, '')
+        .replace(/\\t/g, '');
       return (
         <div
           className="w-4 h-4 flex-shrink-0 [&_svg]:w-full [&_svg]:h-full [&_svg]:fill-current text-zinc-300"
-          dangerouslySetInnerHTML={{ __html: app.svg_logo }}
+          dangerouslySetInnerHTML={{ __html: unescapedSvg }}
         />
       );
     }
