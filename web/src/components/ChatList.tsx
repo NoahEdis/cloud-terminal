@@ -67,6 +67,7 @@ import {
   captureHistory,
   createContextFile,
   getGitHubPat,
+  syncFoldersFromGitHub,
   type ArchivedSession,
 } from "@/lib/api";
 import type { SessionInfo, SessionConfig, ActivityState, SessionMetrics, ChatType } from "@/lib/types";
@@ -223,6 +224,13 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
     setSessionNamesState(getSessionNames());
     setSessionFoldersState(getSessionFolders());
     setFoldersState(getFoldersList());
+
+    // Sync folders from GitHub projects (if PAT configured)
+    syncFoldersFromGitHub().then((newFolders) => {
+      if (newFolders.length > 0) {
+        setFoldersState(getFoldersList());
+      }
+    });
 
     // Load settings from localStorage first for immediate UI
     const storedUrl = localStorage.getItem("terminalApiUrl");

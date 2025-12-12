@@ -418,6 +418,61 @@ export function removeFolder(name: string): void {
   localStorage.setItem(CHAT_FOLDERS_KEY, JSON.stringify(chatFolders));
 }
 
+/**
+ * Fetch project folders from GitHub that have CONTEXT.md files.
+ * Returns folder names (not full paths).
+ */
+export async function getGitHubProjectFolders(): Promise<string[]> {
+  const pat = getGitHubPat();
+  if (!pat) return [];
+
+  try {
+    const res = await fetch(
+      "https://api.github.com/repos/noahedis/cloud-terminal/contents/projects?ref=main",
+      {
+        headers: {
+          Authorization: `Bearer ${pat}`,
+          Accept: "application/vnd.github.v3+json",
+        },
+        signal: AbortSignal.timeout(10000),
+      }
+    );
+
+    if (!res.ok) return [];
+
+    const contents = await res.json();
+
+    // Filter for directories only
+    const folders = contents
+      .filter((item: { type: string; name: string }) => item.type === "dir")
+      .map((item: { name: string }) => item.name);
+
+    return folders;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Sync folders from GitHub projects to local storage.
+ * Creates any folders that exist in GitHub but not locally.
+ * Returns the list of newly created folders.
+ */
+export async function syncFoldersFromGitHub(): Promise<string[]> {
+  const githubFolders = await getGitHubProjectFolders();
+  const localFolders = getFoldersList();
+  const newFolders: string[] = [];
+
+  for (const folder of githubFolders) {
+    if (!localFolders.includes(folder)) {
+      addFolder(folder);
+      newFolders.push(folder);
+    }
+  }
+
+  return newFolders;
+}
+
 // Chat and folder descriptions
 const CHAT_DESCRIPTIONS_KEY = "terminal_chat_descriptions";
 const FOLDER_DESCRIPTIONS_KEY = "terminal_folder_descriptions";
