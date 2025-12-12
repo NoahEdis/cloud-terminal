@@ -2,6 +2,8 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
+import packageJson from "../../package.json";
 import {
   Terminal as TerminalIcon,
   MessageSquare,
@@ -31,6 +33,12 @@ import {
   getSessionWindows,
   connectionManager,
   migrateLocalStorage,
+  getChatNames,
+  setChatName,
+  setChatDescription,
+  generateChatTitle,
+  hasAutoTitleBeenAttempted,
+  markAutoTitleAttempted,
   type ConnectionStatus,
   type WindowInfoResponse,
 } from "@/lib/api";
@@ -79,11 +87,33 @@ export default function Home() {
   const [windowInfo, setWindowInfo] = useState<WindowInfoResponse | null>(null);
   const [copiedSessionId, setCopiedSessionId] = useState(false);
 
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const sidebarRef = useRef<HTMLDivElement>(null);
+
+  // Auto-resize textarea up to max height (15 lines)
+  const adjustTextareaHeight = useCallback(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+
+    // Reset height to auto to get the correct scrollHeight
+    textarea.style.height = "auto";
+
+    // Calculate max height (approximately 15 lines * line-height)
+    const lineHeight = 24; // ~1.5rem at 16px base
+    const maxLines = 15;
+    const padding = 20;
+    const maxHeight = (lineHeight * maxLines) + padding;
+
+    // Set the height to scrollHeight but cap at maxHeight
+    const newHeight = Math.min(textarea.scrollHeight, maxHeight);
+    textarea.style.height = `${newHeight}px`;
+
+    // Enable/disable overflow based on whether content exceeds max
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, []);
 
   // Migrate localStorage keys and start connection health checking on mount
   useEffect(() => {
@@ -213,6 +243,7 @@ export default function Home() {
     e.preventDefault();
     if ((!command.trim() && pendingImages.length === 0) || !selectedSessionId) return;
 
+    const messageText = command.trim();
     setUploadingImage(true);
     try {
       // Upload any pending images first
@@ -224,13 +255,46 @@ export default function Home() {
 
       // Build the message with image paths and text
       // Use \r (carriage return) to trigger Enter in terminal, not \n (line feed)
-      const parts = [...imagePaths, command.trim()].filter(Boolean);
+      const parts = [...imagePaths, messageText].filter(Boolean);
       if (parts.length > 0) {
         await sendInput(selectedSessionId, parts.join(" ") + "\r");
       }
 
+      // Auto-generate session title on first message
+      // Run in background (non-blocking) to avoid slowing down the send
+      if (messageText && !hasAutoTitleBeenAttempted(selectedSessionId)) {
+        const chatNames = getChatNames();
+        // Only generate if no custom name exists
+        if (!chatNames[selectedSessionId]) {
+          markAutoTitleAttempted(selectedSessionId);
+          // Generate title asynchronously - don't await
+          generateChatTitle(messageText)
+            .then(({ name, description }) => {
+              // Double-check no name was set in the meantime
+              const currentNames = getChatNames();
+              if (!currentNames[selectedSessionId]) {
+                setChatName(selectedSessionId, name);
+                if (description) {
+                  setChatDescription(selectedSessionId, description);
+                }
+                // Trigger a refresh of the session list to show the new name
+                // This is a lightweight way to update the UI without full state management
+                window.dispatchEvent(new CustomEvent("chat-name-updated", { detail: { sessionId: selectedSessionId } }));
+              }
+            })
+            .catch((err) => {
+              console.error("Failed to generate session title:", err);
+            });
+        }
+      }
+
       setCommand("");
       setPendingImages([]);
+      // Reset textarea height after clearing
+      if (inputRef.current) {
+        inputRef.current.style.height = "36px";
+        inputRef.current.style.overflowY = "hidden";
+      }
       inputRef.current?.blur();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to send message");
@@ -701,14 +765,26 @@ export default function Home() {
 
               {/* Message input */}
               <div className="flex-1">
-                <Input
+                <textarea
                   ref={inputRef}
                   value={command}
-                  onChange={(e) => setCommand(e.target.value)}
+                  onChange={(e) => {
+                    setCommand(e.target.value);
+                    adjustTextareaHeight();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendCommand(e);
+                    }
+                    // Shift+Enter allows new line (default behavior)
+                  }}
                   onPaste={handlePaste}
                   placeholder="Message..."
                   disabled={sessionStatus !== "running"}
-                  className="h-9 text-[13px] bg-zinc-900 border-zinc-800 placeholder:text-zinc-600 focus-visible:ring-1 focus-visible:ring-zinc-700"
+                  rows={1}
+                  className="w-full px-3 py-2 text-[13px] bg-zinc-900 border border-zinc-800 rounded-md placeholder:text-zinc-600 focus-visible:ring-1 focus-visible:ring-zinc-700 focus:outline-none resize-none leading-5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ minHeight: "36px", maxHeight: "380px", overflowY: "hidden" }}
                 />
               </div>
 
@@ -739,10 +815,14 @@ export default function Home() {
         }}
       />
 
-      {/* Version indicator */}
-      <div className="fixed bottom-2 left-2 px-2 py-1 rounded bg-zinc-900/80 border border-zinc-800/50 text-[10px] text-zinc-600 font-mono z-50">
-        v0.2.14
-      </div>
+      {/* Version indicator - click to view changelog */}
+      <Link
+        href="/changelog"
+        className="fixed bottom-2 left-2 px-2 py-1 rounded bg-zinc-900/80 border border-zinc-800/50 text-[10px] text-zinc-600 hover:text-zinc-400 hover:border-zinc-700 font-mono z-50 transition-colors"
+        title="View changelog"
+      >
+        v{packageJson.version}
+      </Link>
     </div>
   );
 }
