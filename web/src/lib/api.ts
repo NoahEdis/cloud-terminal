@@ -1868,7 +1868,7 @@ export interface ContextFileResponse {
 export function getContextFilePath(folderName: string): string {
   // Sanitize folder name for use in file path
   const safeName = folderName.replace(/[^a-zA-Z0-9_-]/g, "-");
-  return `cloud-terminal/projects/${safeName}/CONTEXT.md`;
+  return `projects/${safeName}/CONTEXT.md`;
 }
 
 /**
