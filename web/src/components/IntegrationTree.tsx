@@ -15,6 +15,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { getIntegrationHierarchy } from "@/lib/api";
+import { CopyableBadge } from "@/components/CopyableBadge";
+import { HealthStatusBadge } from "@/components/HealthStatusBadge";
+import { OnePasswordLink, OP_ACCOUNTS } from "@/components/OnePasswordLink";
 import type {
   IntegrationHierarchy,
   ApplicationNode,
@@ -260,6 +263,7 @@ export function IntegrationTree({
                     >
                       {app.name}
                     </span>
+                    <CopyableBadge value={app.id} truncate={8} />
                     {app.category && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">
                         {app.category}
@@ -312,6 +316,7 @@ export function IntegrationTree({
                             >
                               {org.display_name}
                             </span>
+                            <CopyableBadge value={org.id} truncate={8} />
                             {org.vault_name && (
                               <span className="text-[10px] text-zinc-600">
                                 ({org.vault_name})
@@ -325,36 +330,58 @@ export function IntegrationTree({
                           {/* Credentials */}
                           {isOrgExpanded && credentials.length > 0 && (
                             <div className="pl-12 pb-1">
-                              {credentials.map((cred) => (
-                                <div
-                                  key={cred.id}
-                                  className="flex items-center gap-2 px-2 py-1 rounded hover:bg-zinc-800/30 transition-colors group"
-                                >
-                                  <Key className="w-3 h-3 text-zinc-600" />
-                                  <span
-                                    className="text-[11px] text-zinc-500 truncate flex-1 cursor-pointer hover:text-zinc-400"
-                                    onClick={() => onSelectCredential?.(cred)}
+                              {credentials.map((cred) => {
+                                // Determine 1Password link params
+                                const opAccountId = org.op_account_id || OP_ACCOUNTS[org.name]?.accountId;
+                                const opHost = org.op_host || OP_ACCOUNTS[org.name]?.host;
+                                const canShow1PLink = cred.item_id && org.vault_id && opAccountId && opHost;
+
+                                return (
+                                  <div
+                                    key={cred.id}
+                                    className="flex items-center gap-2 px-2 py-1 rounded hover:bg-zinc-800/30 transition-colors group"
                                   >
-                                    {cred.name}
-                                  </span>
-                                  {cred.service_name && (
-                                    <span className="text-[9px] px-1 py-0.5 rounded bg-zinc-800/50 text-zinc-600">
-                                      {cred.service_name}
-                                    </span>
-                                  )}
-                                  {cred.api_docs_md && (
-                                    <button
-                                      onClick={() =>
-                                        onShowDocs?.(cred.api_docs_md!, cred.name)
-                                      }
-                                      className="p-1 text-zinc-600 hover:text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                                      title="View API docs"
+                                    <HealthStatusBadge
+                                      status={cred.health_status}
+                                      checkedAt={cred.health_checked_at}
+                                    />
+                                    <Key className="w-3 h-3 text-zinc-600" />
+                                    <span
+                                      className="text-[11px] text-zinc-500 truncate cursor-pointer hover:text-zinc-400"
+                                      onClick={() => onSelectCredential?.(cred)}
                                     >
-                                      <FileText className="w-3 h-3" />
-                                    </button>
-                                  )}
-                                </div>
-                              ))}
+                                      {cred.name}
+                                    </span>
+                                    <CopyableBadge value={cred.id} truncate={8} />
+                                    {cred.service_name && (
+                                      <span className="text-[9px] px-1 py-0.5 rounded bg-zinc-800/50 text-zinc-600">
+                                        {cred.service_name}
+                                      </span>
+                                    )}
+                                    <div className="flex items-center gap-1 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                                      {canShow1PLink && (
+                                        <OnePasswordLink
+                                          accountId={opAccountId!}
+                                          vaultId={org.vault_id!}
+                                          itemId={cred.item_id!}
+                                          host={opHost!}
+                                        />
+                                      )}
+                                      {cred.api_docs_md && (
+                                        <button
+                                          onClick={() =>
+                                            onShowDocs?.(cred.api_docs_md!, cred.name)
+                                          }
+                                          className="p-1 text-zinc-600 hover:text-zinc-400"
+                                          title="View API docs"
+                                        >
+                                          <FileText className="w-3 h-3" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
                         </div>

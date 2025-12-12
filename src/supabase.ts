@@ -1334,6 +1334,31 @@ export interface ApplicationNode {
 }
 
 /**
+ * Health status for credential monitoring.
+ */
+export type HealthStatus = "healthy" | "warning" | "error" | "unknown";
+
+/**
+ * Resource hierarchy node.
+ */
+export interface ResourceNode {
+  id: string;
+  name: string;
+  type: string;
+  children?: ResourceNode[];
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Resource hierarchy for a credential.
+ */
+export interface ResourceHierarchy {
+  service_type: string;
+  last_synced_at: string | null;
+  resources: ResourceNode[];
+}
+
+/**
  * Organization node interface.
  */
 export interface OrganizationNode {
@@ -1342,6 +1367,9 @@ export interface OrganizationNode {
   display_name: string;
   vault_id: string | null;
   vault_name: string | null;
+  // 1Password deep link fields
+  op_account_id: string | null;
+  op_host: string | null;
 }
 
 /**
@@ -1356,6 +1384,13 @@ export interface CredentialNode {
   notes: string | null;
   api_docs_md: string | null;
   tracked_credential_id: string | null;
+  // Credential metadata
+  last_used_at: string | null;
+  health_status: HealthStatus;
+  health_checked_at: string | null;
+  scope: string[];
+  // Resource hierarchy
+  resource_hierarchy: ResourceHierarchy | null;
 }
 
 /**
@@ -1577,6 +1612,9 @@ export async function getOrganizationNodes(): Promise<OrganizationNode[]> {
       display_name: (row.properties.display_name as string) || (row.properties.name as string) || "Unknown",
       vault_id: (row.properties.vault_id as string) || null,
       vault_name: (row.properties.vault_name as string) || null,
+      // 1Password deep link fields
+      op_account_id: (row.properties.op_account_id as string) || null,
+      op_host: (row.properties.op_host as string) || null,
     }));
   } catch (error) {
     console.error("[Supabase] Failed to get organization nodes:", error);
@@ -1607,6 +1645,13 @@ export async function getCredentialNodes(): Promise<CredentialNode[]> {
       notes: (row.properties.notes as string) || null,
       api_docs_md: (row.properties.api_docs_md as string) || null,
       tracked_credential_id: (row.properties.tracked_credential_id as string) || null,
+      // Credential metadata
+      last_used_at: (row.properties.last_used_at as string) || null,
+      health_status: (row.properties.health_status as string) || "unknown",
+      health_checked_at: (row.properties.health_checked_at as string) || null,
+      scope: (row.properties.scope as string[]) || [],
+      // Resource hierarchy
+      resource_hierarchy: row.properties.resource_hierarchy || null,
     }));
   } catch (error) {
     console.error("[Supabase] Failed to get credential nodes:", error);

@@ -161,6 +161,46 @@ export interface CredentialsByAccountAndVault {
 // ============================================================================
 
 /**
+ * Health status for credential monitoring.
+ */
+export type HealthStatus = "healthy" | "warning" | "error" | "unknown";
+
+/**
+ * A node in the resource hierarchy tree.
+ * Represents API resources accessible via a credential (teams, spaces, lists, etc.).
+ */
+export interface ResourceNode {
+  id: string;
+  name: string;
+  type: string; // "team", "space", "folder", "list", "workspace", "project", "base", "table"
+  children?: ResourceNode[];
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Resource hierarchy for a credential.
+ * Stores the tree of accessible API resources.
+ */
+export interface ResourceHierarchy {
+  service_type: string; // "clickup", "airtable", "notion", etc.
+  last_synced_at: string | null;
+  resources: ResourceNode[];
+}
+
+/**
+ * A login account node for credential associations.
+ * Links API credentials to their parent user accounts.
+ */
+export interface LoginAccountNode {
+  id: string;
+  email: string | null;
+  username: string | null;
+  display_name: string | null;
+  service: string; // "clickup", "airtable", etc.
+  item_id: string | null; // 1Password item ID for the login
+}
+
+/**
  * An application node from the graph_nodes table.
  * Applications have logos and API documentation.
  */
@@ -185,6 +225,9 @@ export interface OrganizationNode {
   display_name: string;
   vault_id: string | null;
   vault_name: string | null;
+  // 1Password deep link fields
+  op_account_id: string | null;
+  op_host: string | null; // e.g., "my.1password.com", "automationengineer.1password.com"
 }
 
 /**
@@ -200,6 +243,13 @@ export interface CredentialNode {
   notes: string | null;
   api_docs_md: string | null;
   tracked_credential_id: string | null;
+  // Credential metadata
+  last_used_at: string | null;
+  health_status: HealthStatus;
+  health_checked_at: string | null;
+  scope: string[];
+  // Resource hierarchy
+  resource_hierarchy: ResourceHierarchy | null;
 }
 
 /**
