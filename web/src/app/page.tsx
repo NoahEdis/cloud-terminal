@@ -292,7 +292,7 @@ export default function Home() {
       setPendingImages([]);
       // Reset textarea height after clearing
       if (inputRef.current) {
-        inputRef.current.style.height = "52px";
+        inputRef.current.style.height = "28px";
         inputRef.current.style.overflowY = "hidden";
       }
       inputRef.current?.blur();
@@ -712,7 +712,7 @@ export default function Home() {
             )}
 
             {/* ChatGPT-style pill input */}
-            <form onSubmit={handleSendCommand} className="relative">
+            <form onSubmit={handleSendCommand}>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -721,9 +721,24 @@ export default function Home() {
                 onChange={handleFileInputChange}
               />
 
-              {/* Pill container */}
-              <div className="relative bg-zinc-900 border border-zinc-700/50 rounded-[26px] shadow-[0_0_0_1px_rgba(255,255,255,0.05)] focus-within:border-zinc-600 transition-colors">
-                {/* Textarea */}
+              {/* Pill container - flex row, vertically centered */}
+              <div className="flex items-center gap-2 bg-[#303030] border border-[#313131] rounded-full min-h-[84px] px-4 shadow-[0_0_0_1px_rgba(58,58,58,0.55)] focus-within:border-[#454545] transition-colors">
+                {/* Plus button (media upload) - transparent, large hit area */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={sessionStatus !== "running" || uploadingImage}
+                  className="flex-shrink-0 w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="Add media"
+                >
+                  {uploadingImage ? (
+                    <Loader2 className="w-[22px] h-[22px] text-white/90 animate-spin" />
+                  ) : (
+                    <Plus className="w-[22px] h-[22px] text-white/90" />
+                  )}
+                </button>
+
+                {/* Textarea - flex-1, larger text */}
                 <textarea
                   ref={inputRef}
                   value={command}
@@ -738,70 +753,48 @@ export default function Home() {
                     }
                   }}
                   onPaste={handlePaste}
-                  placeholder="Message..."
+                  placeholder="Ask anything"
                   disabled={sessionStatus !== "running"}
                   rows={1}
-                  className="w-full bg-transparent text-[14px] text-zinc-100 placeholder:text-zinc-500 focus:outline-none resize-none leading-6 disabled:opacity-50 disabled:cursor-not-allowed pl-12 pr-24 py-3"
-                  style={{ minHeight: "52px", maxHeight: "200px", overflowY: "hidden" }}
+                  className="flex-1 bg-transparent text-[18px] text-white placeholder-[#AFAFAF] focus:outline-none resize-none leading-6 disabled:opacity-50 disabled:cursor-not-allowed py-6"
+                  style={{ minHeight: "28px", maxHeight: "200px", overflowY: "hidden" }}
                 />
 
-                {/* Plus button (media upload) - bottom left inside pill */}
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={sessionStatus !== "running" || uploadingImage}
-                  className="absolute left-2 bottom-2 w-8 h-8 rounded-full bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
-                  title="Add media"
-                >
-                  {uploadingImage ? (
-                    <Loader2 className="w-4 h-4 text-zinc-400 animate-spin" />
-                  ) : (
-                    <Plus className="w-4 h-4 text-zinc-400" />
-                  )}
-                </button>
-
-                {/* Right side buttons - bottom right inside pill */}
-                <div className="absolute right-2 bottom-2 flex items-center gap-1">
-                  {/* Microphone button (dictation) */}
+                {/* Right side controls */}
+                <div className="flex-shrink-0 flex items-center gap-2">
+                  {/* Small mic button - transparent, for dictation */}
                   <button
                     type="button"
                     onClick={isRecording ? stopRecording : startRecording}
                     disabled={sessionStatus !== "running"}
-                    className={`w-8 h-8 rounded-full transition-colors flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed ${
+                    className={`w-11 h-11 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       isRecording
                         ? "bg-red-600 hover:bg-red-500"
-                        : "bg-zinc-800 hover:bg-zinc-700"
+                        : "hover:bg-white/10"
                     }`}
                     title="Voice dictation"
                   >
                     {isRecording ? (
-                      <Square className="w-3.5 h-3.5 text-white" />
+                      <Square className="w-[18px] h-[18px] text-white" />
                     ) : (
-                      <Mic className="w-4 h-4 text-zinc-400" />
+                      <Mic className="w-[20px] h-[20px] text-white/70" />
                     )}
                   </button>
 
-                  {/* Voice chat button */}
+                  {/* Primary action button - large white circle, icon swaps based on state */}
                   <button
-                    type="button"
-                    onClick={() => setVoiceChatOpen(true)}
+                    type={command.trim() || pendingImages.length > 0 ? "submit" : "button"}
+                    onClick={command.trim() || pendingImages.length > 0 ? undefined : () => setVoiceChatOpen(true)}
                     disabled={sessionStatus !== "running"}
-                    className="w-8 h-8 rounded-full bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
-                    title="Live voice chat"
+                    className="w-14 h-14 flex items-center justify-center rounded-full bg-white hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title={command.trim() || pendingImages.length > 0 ? "Send message" : "Voice chat"}
                   >
-                    <Headphones className="w-4 h-4 text-zinc-400" />
+                    {command.trim() || pendingImages.length > 0 ? (
+                      <ArrowUp className="w-6 h-6 text-black" />
+                    ) : (
+                      <Headphones className="w-6 h-6 text-black" />
+                    )}
                   </button>
-
-                  {/* Send button - only shows when there's content */}
-                  {(command.trim() || pendingImages.length > 0) && (
-                    <button
-                      type="submit"
-                      disabled={sessionStatus !== "running"}
-                      className="w-8 h-8 rounded-full bg-zinc-100 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
-                    >
-                      <ArrowUp className="w-4 h-4 text-zinc-900" />
-                    </button>
-                  )}
                 </div>
               </div>
             </form>
