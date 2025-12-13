@@ -6,6 +6,7 @@ const PUBLIC_ROUTES = [
   "/api/browser",
   "/api/diagrams",
   "/api/graph",
+  "/api/sync",
   "/api/brain",
   "/browser",
   "/brain",
