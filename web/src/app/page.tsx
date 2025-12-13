@@ -54,6 +54,7 @@ const MessageView = dynamic(() => import("@/components/MessageView"), { ssr: fal
 const GraphView = dynamic(() => import("@/components/GraphView"), { ssr: false });
 const CanvasView = dynamic(() => import("@/components/CanvasView"), { ssr: false });
 const VoiceChatDialog = dynamic(() => import("@/components/VoiceChatDialog"), { ssr: false });
+const LLMChat = dynamic(() => import("@/components/LLMChat"), { ssr: false });
 
 type ViewMode = "terminal" | "messages" | "graph" | "canvas";
 
@@ -448,6 +449,7 @@ export default function Home() {
   }, [isRestarting]);
 
   const currentSession = sessions.find(s => getSessionId(s) === selectedSessionId);
+  const isLLMChat = currentSession?.chatType === "llm";
 
   // On mobile, show chat list when no session selected
   const showMobileChatList = isMobile && !selectedSessionId;
@@ -663,7 +665,15 @@ export default function Home() {
         {!showMobileChatList && (
         <div className="isolate z-10 flex-1 flex flex-col min-w-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-hidden">
-            {viewMode === "terminal" ? (
+            {/* LLM Chat gets its own dedicated view */}
+            {isLLMChat && selectedSessionId && currentSession?.llmConfig ? (
+              <LLMChat
+                chatId={selectedSessionId}
+                provider={currentSession.llmConfig.provider}
+                model={currentSession.llmConfig.model}
+                systemPrompt={currentSession.llmConfig.systemPrompt}
+              />
+            ) : viewMode === "terminal" ? (
               selectedSessionId ? (
                 <Terminal
                   sessionId={selectedSessionId}
@@ -708,8 +718,8 @@ export default function Home() {
             )}
           </div>
 
-          {/* Input bar - hidden in graph and canvas modes */}
-          {viewMode !== "graph" && viewMode !== "canvas" && (
+          {/* Input bar - hidden in graph, canvas modes, and LLM chats */}
+          {viewMode !== "graph" && viewMode !== "canvas" && !isLLMChat && (
           <div className="border-t border-zinc-800 p-2.5 pb-4 bg-zinc-950 safe-area-bottom mobile-input-padding">
             {error && (
               <div className="mb-2 px-2.5 py-1.5 text-[12px] text-red-400 bg-red-950/50 rounded flex items-center justify-between">

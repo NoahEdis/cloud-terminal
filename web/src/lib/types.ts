@@ -1,6 +1,31 @@
 export type ActivityState = "idle" | "busy" | "exited";
 
-export type ChatType = "claude" | "codex" | "custom";
+export type ChatType = "claude" | "codex" | "custom" | "llm";
+
+// LLM Provider types
+export type LLMProvider = "anthropic" | "openai" | "gemini" | "deepseek" | "groq" | "ollama";
+
+export interface LLMConfig {
+  provider: LLMProvider;
+  model: string;
+  systemPrompt?: string;
+  temperature?: number;
+}
+
+export interface LLMMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  timestamp: string;
+}
+
+export interface LLMChatState {
+  messages: LLMMessage[];
+  isStreaming: boolean;
+  provider: LLMProvider;
+  model: string;
+  systemPrompt?: string;
+}
 
 // Task status for rich visual indicators
 export interface TaskStatus {
@@ -50,6 +75,8 @@ export interface ChatInfo {
   metrics?: ChatMetrics;
   // Chat type for determining available features
   chatType?: ChatType;
+  // LLM configuration (for chatType === "llm")
+  llmConfig?: LLMConfig;
   // Task status for visual indicators
   taskStatus?: TaskStatus;
 }
@@ -72,6 +99,8 @@ export interface ChatConfig {
   autoRunCommand?: string;
   // Project context to inject into Claude Code sessions via /context add
   projectContext?: string;
+  // LLM configuration (for chatType === "llm")
+  llmConfig?: LLMConfig;
 }
 
 // Legacy aliases for backward compatibility during migration

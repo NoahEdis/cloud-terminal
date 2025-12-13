@@ -73,8 +73,10 @@ import {
   getContextFile,
   type ArchivedSession,
 } from "@/lib/api";
-import type { SessionInfo, SessionConfig, ActivityState, SessionMetrics, ChatType } from "@/lib/types";
+import type { SessionInfo, SessionConfig, ActivityState, SessionMetrics, ChatType, LLMProvider } from "@/lib/types";
 import { getSessionId } from "@/lib/types";
+import { PROVIDERS, getModelsForProvider, getDefaultModel, hasStoredApiKey, getStoredApiKey, storeApiKey } from "@/lib/llm-api";
+import { MessageSquare } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -166,11 +168,21 @@ export default function ChatList({ selectedId, onSelect, onRestart, isRestarting
   const [newSessionFolder, setNewSessionFolder] = useState("");
   // Chat type for new chat dialog
   const [newChatType, setNewChatType] = useState<ChatType>("claude");
+  // Chat category: "agentic" for Claude Code/Codex, "llm" for direct LLM chat
+  const [chatCategory, setChatCategory] = useState<"agentic" | "llm">("agentic");
+  // LLM selection state
+  const [llmProvider, setLlmProvider] = useState<LLMProvider>("anthropic");
+  const [llmModel, setLlmModel] = useState<string>("claude-sonnet-4-20250514");
+  const [llmSystemPrompt, setLlmSystemPrompt] = useState<string>("");
   const [showSettings, setShowSettings] = useState(false);
   const [apiUrl, setApiUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [geminiApiKey, setGeminiApiKey] = useState("");
+  // Additional LLM provider API keys
+  const [anthropicApiKey, setAnthropicApiKey] = useState("");
+  const [deepseekApiKey, setDeepseekApiKey] = useState("");
+  const [groqApiKey, setGroqApiKey] = useState("");
   // Claude Code settings
   const [skipPermissions, setSkipPermissions] = useState(true);
   // Codex CLI settings
@@ -216,7 +228,14 @@ export default function ChatList({ selectedId, onSelect, onRestart, isRestarting
     try {
       setError(null);
       const data = await listSessions();
-      setSessions(data);
+
+      // Also load stored LLM chats from localStorage
+      const llmChatsKey = "llm_chats";
+      const storedLLMChats = JSON.parse(localStorage.getItem(llmChatsKey) || "{}");
+      const llmChats: SessionInfo[] = Object.values(storedLLMChats);
+
+      // Merge terminal sessions with LLM chats
+      setSessions([...data, ...llmChats]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to fetch sessions");
     } finally {
@@ -251,6 +270,10 @@ export default function ChatList({ selectedId, onSelect, onRestart, isRestarting
     setGeminiApiKey(storedGeminiKey || "");
     setSkipPermissions(storedSkipPermissions !== "false"); // Default to true
     setCodexFullAuto(storedCodexFullAuto === "true"); // Default to false
+    // Load LLM provider API keys
+    setAnthropicApiKey(getStoredApiKey("anthropic") || "");
+    setDeepseekApiKey(getStoredApiKey("deepseek") || "");
+    setGroqApiKey(getStoredApiKey("groq") || "");
     setLocalStorageLoaded(true);
 
     // Then load persisted settings from Supabase (overrides localStorage if available)
@@ -328,7 +351,69 @@ export default function ChatList({ selectedId, onSelect, onRestart, isRestarting
     setIsCreating(true);
 
     try {
-      // Build auto-run command based on chat type
+      const folderToAssign = newSessionFolder && newSessionFolder !== "__none__" ? newSessionFolder : "";
+
+      // Determine the actual chat type based on category
+      const actualChatType: ChatType = chatCategory === "llm" ? "llm" : newChatType;
+
+      // For LLM chats, we create a virtual session (not a terminal session)
+      if (actualChatType === "llm") {
+        // Generate a unique ID for the LLM chat
+        const chatId = `llm_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+        // Load context if folder is assigned
+        let systemPromptWithContext = llmSystemPrompt;
+        if (folderToAssign && getGitHubPat()) {
+          try {
+            const contextFile = await getContextFile(folderToAssign);
+            if (contextFile.exists && contextFile.content.trim()) {
+              systemPromptWithContext = `# Project Context\n${contextFile.content}\n\n---\n${llmSystemPrompt || ""}`.trim();
+              console.log(`[ChatList] Loaded context for LLM chat in folder "${folderToAssign}"`);
+            }
+          } catch (err) {
+            console.warn(`[ChatList] Failed to fetch context for folder "${folderToAssign}":`, err);
+          }
+        }
+
+        // Create a virtual session for the LLM chat
+        const llmSession: SessionInfo = {
+          name: chatId,
+          cwd: newSessionConfig.cwd || "/Users/noahedis",
+          cols: null,
+          rows: null,
+          status: "running",
+          createdAt: new Date().toISOString(),
+          lastActivity: new Date().toISOString(),
+          clientCount: 0,
+          chatType: "llm",
+          llmConfig: {
+            provider: llmProvider,
+            model: llmModel,
+            systemPrompt: systemPromptWithContext,
+          },
+        };
+
+        // Store the LLM chat info in localStorage
+        const llmChatsKey = "llm_chats";
+        const existingChats = JSON.parse(localStorage.getItem(llmChatsKey) || "{}");
+        existingChats[chatId] = llmSession;
+        localStorage.setItem(llmChatsKey, JSON.stringify(existingChats));
+
+        setSessions((prev) => [...prev, llmSession]);
+
+        // Handle folder assignment
+        if (folderToAssign) {
+          setSessionFolder(chatId, folderToAssign);
+          setSessionFoldersState(getSessionFolders());
+        }
+
+        setShowNewSession(false);
+        resetNewChatState();
+        onSelect(chatId);
+        return;
+      }
+
+      // Build auto-run command based on chat type (for agentic chats)
       let autoRunCommand: string | undefined;
       if (newChatType === "claude") {
         autoRunCommand = skipPermissions ? "claude --dangerously-skip-permissions" : "claude";
@@ -338,7 +423,6 @@ export default function ChatList({ selectedId, onSelect, onRestart, isRestarting
 
       // Check if folder has project context (for Claude Code sessions)
       let projectContext: string | undefined;
-      const folderToAssign = newSessionFolder && newSessionFolder !== "__none__" ? newSessionFolder : "";
       if (folderToAssign && newChatType === "claude" && getGitHubPat()) {
         try {
           const contextFile = await getContextFile(folderToAssign);
@@ -372,15 +456,24 @@ export default function ChatList({ selectedId, onSelect, onRestart, isRestarting
         setRecentDirectoriesState(getRecentDirectories());
       }
       setShowNewSession(false);
-      setNewSessionConfig({ command: "zsh", cwd: "/Users/noahedis" });
-      setNewSessionFolder("");
-      setNewChatType("claude"); // Reset to default
+      resetNewChatState();
       onSelect(sessionId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create session");
     } finally {
       setIsCreating(false);
     }
+  };
+
+  // Reset new chat dialog state
+  const resetNewChatState = () => {
+    setNewSessionConfig({ command: "zsh", cwd: "/Users/noahedis" });
+    setNewSessionFolder("");
+    setNewChatType("claude");
+    setChatCategory("agentic");
+    setLlmProvider("anthropic");
+    setLlmModel("claude-sonnet-4-20250514");
+    setLlmSystemPrompt("");
   };
 
   // Directory picker helpers
@@ -577,6 +670,11 @@ export default function ChatList({ selectedId, onSelect, onRestart, isRestarting
     localStorage.setItem("geminiApiKey", geminiApiKey);
     localStorage.setItem("claudeSkipPermissions", skipPermissions.toString());
     localStorage.setItem("codexFullAuto", codexFullAuto.toString());
+
+    // Save LLM provider API keys
+    storeApiKey("anthropic", anthropicApiKey);
+    storeApiKey("deepseek", deepseekApiKey);
+    storeApiKey("groq", groqApiKey);
 
     // Persist API keys and settings to Supabase for cross-device/deploy persistence
     try {
@@ -1219,155 +1317,266 @@ export default function ChatList({ selectedId, onSelect, onRestart, isRestarting
             <DialogTitle className="text-[14px] font-medium text-zinc-100">New Chat</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            {/* Chat Type Selector */}
-            <div className="space-y-2">
-              <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-                Chat Type
-              </label>
-              <div className="grid gap-2">
-                <button
-                  type="button"
-                  onClick={() => setNewChatType("claude")}
-                  className={`flex items-start gap-3 p-3 rounded border transition-colors text-left ${
-                    newChatType === "claude"
-                      ? "border-emerald-600 bg-emerald-950/30"
-                      : "border-zinc-800 hover:border-zinc-700 bg-zinc-900/50"
-                  }`}
-                >
-                  <div className={`p-1.5 rounded ${newChatType === "claude" ? "bg-emerald-600" : "bg-zinc-800"}`}>
-                    <Bot className="w-4 h-4 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[12px] font-medium text-zinc-200">Claude Code</span>
-                      {newChatType === "claude" && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-600/20 text-emerald-400 border border-emerald-600/30">
-                          Selected
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-zinc-500 mt-0.5">
-                      AI-powered coding assistant with full codebase access
-                    </p>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setNewChatType("codex")}
-                  className={`flex items-start gap-3 p-3 rounded border transition-colors text-left ${
-                    newChatType === "codex"
-                      ? "border-blue-600 bg-blue-950/30"
-                      : "border-zinc-800 hover:border-zinc-700 bg-zinc-900/50"
-                  }`}
-                >
-                  <div className={`p-1.5 rounded ${newChatType === "codex" ? "bg-blue-600" : "bg-zinc-800"}`}>
-                    <Sparkles className="w-4 h-4 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[12px] font-medium text-zinc-200">OpenAI Codex</span>
-                      {newChatType === "codex" && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-600/20 text-blue-400 border border-blue-600/30">
-                          Selected
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-zinc-500 mt-0.5">
-                      OpenAI's coding agent powered by GPT models
-                    </p>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setNewChatType("custom")}
-                  className={`flex items-start gap-3 p-3 rounded border transition-colors text-left ${
-                    newChatType === "custom"
-                      ? "border-zinc-600 bg-zinc-900"
-                      : "border-zinc-800 hover:border-zinc-700 bg-zinc-900/50"
-                  }`}
-                >
-                  <div className={`p-1.5 rounded ${newChatType === "custom" ? "bg-zinc-600" : "bg-zinc-800"}`}>
-                    <Terminal className="w-4 h-4 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[12px] font-medium text-zinc-200">Custom Terminal</span>
-                      {newChatType === "custom" && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-600/20 text-zinc-400 border border-zinc-600/30">
-                          Selected
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-zinc-500 mt-0.5">
-                      Standard terminal session with any shell command
-                    </p>
-                  </div>
-                </button>
-              </div>
+            {/* Category Tabs */}
+            <div className="flex gap-1 p-1 bg-zinc-900 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setChatCategory("agentic")}
+                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-[12px] font-medium transition-colors ${
+                  chatCategory === "agentic"
+                    ? "bg-zinc-800 text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                <Bot className="w-4 h-4" />
+                Agentic Models
+              </button>
+              <button
+                type="button"
+                onClick={() => setChatCategory("llm")}
+                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-[12px] font-medium transition-colors ${
+                  chatCategory === "llm"
+                    ? "bg-zinc-800 text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                <MessageSquare className="w-4 h-4" />
+                Chat / LLM
+              </button>
             </div>
 
-            {/* Claude Code Settings - only show when Claude type selected */}
-            {newChatType === "claude" && (
-              <div className="flex items-center justify-between p-3 bg-zinc-900/50 rounded border border-zinc-800">
-                <div>
-                  <p className="text-[12px] text-zinc-200">Skip permission prompts</p>
-                  <p className="text-[10px] text-zinc-500">Auto-run with --dangerously-skip-permissions</p>
+            {/* Agentic Models Content */}
+            {chatCategory === "agentic" && (
+              <>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                    Chat Type
+                  </label>
+                  <div className="grid gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewChatType("claude")}
+                      className={`flex items-start gap-3 p-3 rounded border transition-colors text-left ${
+                        newChatType === "claude"
+                          ? "border-emerald-600 bg-emerald-950/30"
+                          : "border-zinc-800 hover:border-zinc-700 bg-zinc-900/50"
+                      }`}
+                    >
+                      <div className={`p-1.5 rounded ${newChatType === "claude" ? "bg-emerald-600" : "bg-zinc-800"}`}>
+                        <Bot className="w-4 h-4 text-white" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] font-medium text-zinc-200">Claude Code</span>
+                          {newChatType === "claude" && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-600/20 text-emerald-400 border border-emerald-600/30">
+                              Selected
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-zinc-500 mt-0.5">
+                          AI-powered coding assistant with full codebase access
+                        </p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewChatType("codex")}
+                      className={`flex items-start gap-3 p-3 rounded border transition-colors text-left ${
+                        newChatType === "codex"
+                          ? "border-blue-600 bg-blue-950/30"
+                          : "border-zinc-800 hover:border-zinc-700 bg-zinc-900/50"
+                      }`}
+                    >
+                      <div className={`p-1.5 rounded ${newChatType === "codex" ? "bg-blue-600" : "bg-zinc-800"}`}>
+                        <Sparkles className="w-4 h-4 text-white" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] font-medium text-zinc-200">OpenAI Codex</span>
+                          {newChatType === "codex" && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-600/20 text-blue-400 border border-blue-600/30">
+                              Selected
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-zinc-500 mt-0.5">
+                          OpenAI&apos;s coding agent powered by GPT models
+                        </p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewChatType("custom")}
+                      className={`flex items-start gap-3 p-3 rounded border transition-colors text-left ${
+                        newChatType === "custom"
+                          ? "border-zinc-600 bg-zinc-900"
+                          : "border-zinc-800 hover:border-zinc-700 bg-zinc-900/50"
+                      }`}
+                    >
+                      <div className={`p-1.5 rounded ${newChatType === "custom" ? "bg-zinc-600" : "bg-zinc-800"}`}>
+                        <Terminal className="w-4 h-4 text-white" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] font-medium text-zinc-200">Custom Terminal</span>
+                          {newChatType === "custom" && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-600/20 text-zinc-400 border border-zinc-600/30">
+                              Selected
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-zinc-500 mt-0.5">
+                          Standard terminal session with any shell command
+                        </p>
+                      </div>
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSkipPermissions(!skipPermissions)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                    skipPermissions ? "bg-emerald-600" : "bg-zinc-700"
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      skipPermissions ? "translate-x-[18px]" : "translate-x-1"
-                    }`}
-                  />
-                </button>
-              </div>
+
+                {/* Claude Code Settings - only show when Claude type selected */}
+                {newChatType === "claude" && (
+                  <div className="flex items-center justify-between p-3 bg-zinc-900/50 rounded border border-zinc-800">
+                    <div>
+                      <p className="text-[12px] text-zinc-200">Skip permission prompts</p>
+                      <p className="text-[10px] text-zinc-500">Auto-run with --dangerously-skip-permissions</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSkipPermissions(!skipPermissions)}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                        skipPermissions ? "bg-emerald-600" : "bg-zinc-700"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                          skipPermissions ? "translate-x-[18px]" : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                )}
+
+                {/* Codex Settings - only show when Codex type selected */}
+                {newChatType === "codex" && (
+                  <div className="flex items-center justify-between p-3 bg-zinc-900/50 rounded border border-zinc-800">
+                    <div>
+                      <p className="text-[12px] text-zinc-200">Full Auto mode</p>
+                      <p className="text-[10px] text-zinc-500">Run with --full-auto to skip most prompts</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCodexFullAuto(!codexFullAuto)}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                        codexFullAuto ? "bg-blue-600" : "bg-zinc-700"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                          codexFullAuto ? "translate-x-[18px]" : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                )}
+
+                {/* Command input - only show for custom type */}
+                {newChatType === "custom" && (
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                      Command
+                    </label>
+                    <Input
+                      type="text"
+                      value={newSessionConfig.command}
+                      onChange={(e) =>
+                        setNewSessionConfig((prev) => ({ ...prev, command: e.target.value }))
+                      }
+                      placeholder="zsh"
+                      className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
+                    />
+                  </div>
+                )}
+              </>
             )}
 
-            {/* Codex Settings - only show when Codex type selected */}
-            {newChatType === "codex" && (
-              <div className="flex items-center justify-between p-3 bg-zinc-900/50 rounded border border-zinc-800">
-                <div>
-                  <p className="text-[12px] text-zinc-200">Full Auto mode</p>
-                  <p className="text-[10px] text-zinc-500">Run with --full-auto to skip most prompts</p>
+            {/* Chat/LLM Models Content */}
+            {chatCategory === "llm" && (
+              <>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                    Provider
+                  </label>
+                  <Select
+                    value={llmProvider}
+                    onValueChange={(value: LLMProvider) => {
+                      setLlmProvider(value);
+                      setLlmModel(getDefaultModel(value));
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-300">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-zinc-900 border-zinc-800">
+                      {(Object.keys(PROVIDERS) as LLMProvider[]).map((provider) => (
+                        <SelectItem key={provider} value={provider} className="text-[12px]">
+                          <div className="flex items-center gap-2">
+                            <span>{PROVIDERS[provider].name}</span>
+                            {!hasStoredApiKey(provider) && provider !== "ollama" && (
+                              <span className="text-[9px] text-amber-500">(no key)</span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setCodexFullAuto(!codexFullAuto)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                    codexFullAuto ? "bg-blue-600" : "bg-zinc-700"
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      codexFullAuto ? "translate-x-[18px]" : "translate-x-1"
-                    }`}
-                  />
-                </button>
-              </div>
-            )}
 
-            {/* Command input - only show for custom type */}
-            {newChatType === "custom" && (
-              <div className="space-y-2">
-                <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-                  Command
-                </label>
-                <Input
-                  type="text"
-                  value={newSessionConfig.command}
-                  onChange={(e) =>
-                    setNewSessionConfig((prev) => ({ ...prev, command: e.target.value }))
-                  }
-                  placeholder="zsh"
-                  className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
-                />
-              </div>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                    Model
+                  </label>
+                  <Select value={llmModel} onValueChange={setLlmModel}>
+                    <SelectTrigger className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-300">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-zinc-900 border-zinc-800">
+                      {getModelsForProvider(llmProvider).map((model) => (
+                        <SelectItem key={model.id} value={model.id} className="text-[12px]">
+                          <div className="flex items-center justify-between gap-4">
+                            <span>{model.name}</span>
+                            {model.inputCost > 0 && (
+                              <span className="text-[10px] text-zinc-500">
+                                ${model.inputCost}/${model.outputCost}
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                    System Prompt (optional)
+                  </label>
+                  <textarea
+                    value={llmSystemPrompt}
+                    onChange={(e) => setLlmSystemPrompt(e.target.value)}
+                    placeholder="You are a helpful assistant..."
+                    className="w-full h-20 px-3 py-2 text-[12px] bg-zinc-900 border border-zinc-800 rounded-md text-zinc-200 placeholder:text-zinc-600 resize-none focus:outline-none focus:ring-1 focus:ring-zinc-700"
+                  />
+                </div>
+
+                {!hasStoredApiKey(llmProvider) && llmProvider !== "ollama" && (
+                  <div className="p-3 bg-amber-900/20 border border-amber-800/50 rounded">
+                    <p className="text-[11px] text-amber-400">
+                      No API key configured for {PROVIDERS[llmProvider].name}. Add it in Settings to use this provider.
+                    </p>
+                  </div>
+                )}
+              </>
             )}
 
             <div className="space-y-2">
@@ -1687,6 +1896,45 @@ export default function ChatList({ selectedId, onSelect, onRestart, isRestarting
                     className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
                   />
                   <p className="text-[10px] text-zinc-600">Used for Gemini-powered features</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                    Anthropic API Key
+                  </label>
+                  <Input
+                    type="password"
+                    value={anthropicApiKey}
+                    onChange={(e) => setAnthropicApiKey(e.target.value)}
+                    placeholder="sk-ant-..."
+                    className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
+                  />
+                  <p className="text-[10px] text-zinc-600">Used for Claude models in LLM Chat</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                    DeepSeek API Key
+                  </label>
+                  <Input
+                    type="password"
+                    value={deepseekApiKey}
+                    onChange={(e) => setDeepseekApiKey(e.target.value)}
+                    placeholder="sk-..."
+                    className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
+                  />
+                  <p className="text-[10px] text-zinc-600">Used for DeepSeek models in LLM Chat</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                    Groq API Key
+                  </label>
+                  <Input
+                    type="password"
+                    value={groqApiKey}
+                    onChange={(e) => setGroqApiKey(e.target.value)}
+                    placeholder="gsk_..."
+                    className="h-8 text-[12px] bg-zinc-900 border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
+                  />
+                  <p className="text-[10px] text-zinc-600">Used for Groq-hosted models in LLM Chat</p>
                 </div>
               </div>
             </div>
