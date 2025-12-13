@@ -18,6 +18,7 @@ import { credentialsApi } from "./routes/credentials-api.js";
 import { settingsApi } from "./routes/settings-api.js";
 import { brainApi } from "./routes/brain-api.js";
 import { githubApi } from "./routes/github-api.js";
+import { syncApi } from "./routes/sync-api.js";
 import { handleTmuxWebSocketConnection } from "./websocket/tmux-handler.js";
 import { tmuxSessionManager } from "./tmux-session-manager.js";
 import { authMiddleware } from "./middleware/auth.js";
@@ -88,6 +89,7 @@ export function createTmuxTerminalServer(config: ServerConfig = {}) {
   app.route("/api/settings", settingsApi);
   app.route("/api/brain", brainApi);
   app.route("/api/github", githubApi);
+  app.route("/api/sync", syncApi);
 
   // Create HTTP server
   const httpServer = createServer();

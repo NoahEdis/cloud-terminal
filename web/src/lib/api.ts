@@ -2364,3 +2364,190 @@ export function getCredentialApiDocsTemplate(credentialName: string, appName: st
 <!-- Any notes specific to this credential -->
 `;
 }
+
+// ============================================================================
+// Sync Management API
+// ============================================================================
+
+import type { SyncSource, SyncRun, SyncSourceConfig } from "./sync-types";
+
+/**
+ * Get all sync sources with status.
+ */
+export async function getSyncSources(): Promise<SyncSource[]> {
+  try {
+    const res = await fetch(`${getApiUrl()}/api/sync/sources`, {
+      headers: headers(),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch sync sources: ${res.status}`);
+    }
+
+    return res.json();
+  } catch (err) {
+    console.error("[API] getSyncSources error:", err);
+    throw new Error(err instanceof Error ? err.message : "Failed to fetch sync sources");
+  }
+}
+
+/**
+ * Get a single sync source by name.
+ */
+export async function getSyncSource(name: string): Promise<SyncSource | null> {
+  try {
+    const res = await fetch(`${getApiUrl()}/api/sync/sources/${encodeURIComponent(name)}`, {
+      headers: headers(),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (res.status === 404) {
+      return null;
+    }
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch sync source: ${res.status}`);
+    }
+
+    return res.json();
+  } catch (err) {
+    console.error(`[API] getSyncSource(${name}) error:`, err);
+    throw new Error(err instanceof Error ? err.message : "Failed to fetch sync source");
+  }
+}
+
+/**
+ * Trigger a manual sync for a source.
+ */
+export async function triggerSync(
+  name: string,
+  options?: Record<string, unknown>
+): Promise<SyncRun> {
+  try {
+    const res = await fetch(`${getApiUrl()}/api/sync/sources/${encodeURIComponent(name)}/trigger`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ options }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (res.status === 409) {
+      throw new Error("Sync already in progress");
+    }
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Failed to trigger sync: ${res.status}`);
+    }
+
+    return res.json();
+  } catch (err) {
+    console.error(`[API] triggerSync(${name}) error:`, err);
+    throw new Error(err instanceof Error ? err.message : "Failed to trigger sync");
+  }
+}
+
+/**
+ * Update sync configuration.
+ */
+export async function updateSyncConfig(
+  name: string,
+  config: SyncSourceConfig
+): Promise<SyncSource> {
+  try {
+    const res = await fetch(`${getApiUrl()}/api/sync/sources/${encodeURIComponent(name)}/config`, {
+      method: "PATCH",
+      headers: headers(),
+      body: JSON.stringify(config),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Failed to update config: ${res.status}`);
+    }
+
+    return res.json();
+  } catch (err) {
+    console.error(`[API] updateSyncConfig(${name}) error:`, err);
+    throw new Error(err instanceof Error ? err.message : "Failed to update configuration");
+  }
+}
+
+/**
+ * Get sync history with optional filters.
+ */
+export async function getSyncHistory(filters?: {
+  source?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<SyncRun[]> {
+  try {
+    const params = new URLSearchParams();
+    if (filters?.source) params.set("source", filters.source);
+    if (filters?.limit) params.set("limit", String(filters.limit));
+    if (filters?.offset) params.set("offset", String(filters.offset));
+
+    const query = params.toString() ? `?${params}` : "";
+    const res = await fetch(`${getApiUrl()}/api/sync/history${query}`, {
+      headers: headers(),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch sync history: ${res.status}`);
+    }
+
+    return res.json();
+  } catch (err) {
+    console.error("[API] getSyncHistory error:", err);
+    throw new Error(err instanceof Error ? err.message : "Failed to fetch sync history");
+  }
+}
+
+/**
+ * Get a single sync run by ID.
+ */
+export async function getSyncRun(id: string): Promise<SyncRun | null> {
+  try {
+    const res = await fetch(`${getApiUrl()}/api/sync/history/${encodeURIComponent(id)}`, {
+      headers: headers(),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (res.status === 404) {
+      return null;
+    }
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch sync run: ${res.status}`);
+    }
+
+    return res.json();
+  } catch (err) {
+    console.error(`[API] getSyncRun(${id}) error:`, err);
+    throw new Error(err instanceof Error ? err.message : "Failed to fetch sync run");
+  }
+}
+
+/**
+ * Cancel a running sync.
+ */
+export async function cancelSync(runId: string): Promise<void> {
+  try {
+    const res = await fetch(`${getApiUrl()}/api/sync/history/${encodeURIComponent(runId)}/cancel`, {
+      method: "POST",
+      headers: headers(),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Failed to cancel sync: ${res.status}`);
+    }
+  } catch (err) {
+    console.error(`[API] cancelSync(${runId}) error:`, err);
+    throw new Error(err instanceof Error ? err.message : "Failed to cancel sync");
+  }
+}

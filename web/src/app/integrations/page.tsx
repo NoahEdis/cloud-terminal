@@ -16,6 +16,7 @@ import {
   X,
   Plug,
   FolderTree,
+  ArrowRightLeft,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -187,6 +188,13 @@ export default function IntegrationsPage() {
               <LayoutGrid className="w-3 h-3" />
               <span className="hidden sm:inline">Graph</span>
             </button>
+            <button
+              onClick={() => router.push("/integrations/syncs")}
+              className="flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors text-zinc-500 hover:text-zinc-300"
+            >
+              <ArrowRightLeft className="w-3 h-3" />
+              <span className="hidden sm:inline">Syncs</span>
+            </button>
           </div>
         </header>
 
@@ -239,6 +247,13 @@ export default function IntegrationsPage() {
           >
             <LayoutGrid className="w-3 h-3" />
             <span className="hidden sm:inline">Graph</span>
+          </button>
+          <button
+            onClick={() => router.push("/integrations/syncs")}
+            className="flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors text-zinc-500 hover:text-zinc-300"
+          >
+            <ArrowRightLeft className="w-3 h-3" />
+            <span className="hidden sm:inline">Syncs</span>
           </button>
         </div>
       </header>

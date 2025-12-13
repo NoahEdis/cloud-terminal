@@ -31,7 +31,9 @@ import {
   Brain,
   Globe,
   Sparkles,
+  RotateCw,
 } from "lucide-react";
+import packageJson from "../../package.json";
 import {
   listSessions,
   createSession,
@@ -116,6 +118,8 @@ import {
 interface ChatListProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onRestart?: () => void;
+  isRestarting?: boolean;
 }
 
 function ActivityIndicator({ state }: { state?: ActivityState }) {
@@ -141,7 +145,7 @@ function ActivityIndicator({ state }: { state?: ActivityState }) {
   );
 }
 
-export default function ChatList({ selectedId, onSelect }: ChatListProps) {
+export default function ChatList({ selectedId, onSelect, onRestart, isRestarting }: ChatListProps) {
   // Note: internal state still uses "session" naming for backward compatibility
   // but the external interface and UI use "chat" terminology
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -1161,7 +1165,7 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
       </ScrollArea>
 
       {/* Footer with Browser, Brain, and Credentials buttons */}
-      <div className="px-3 py-2 pb-10 border-t border-zinc-800 space-y-1">
+      <div className="px-3 py-2 border-t border-zinc-800 space-y-1">
         <button
           onClick={() => router.push("/browser")}
           className="w-full flex items-center gap-2 px-2 py-1.5 text-[12px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 rounded transition-colors"
@@ -1183,6 +1187,29 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
           <Plug className="w-4 h-4" />
           <span>Integrations</span>
         </button>
+
+        {/* Version and restart button */}
+        <div className="flex items-center gap-1.5 pt-2 mt-2 border-t border-zinc-800/50">
+          <a
+            href="https://github.com/NoahEdis/cloud-terminal/commits/main"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-2 py-0.5 rounded bg-zinc-900/90 border border-zinc-800/60 text-[10px] text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 font-mono transition-colors"
+            title="View commits on GitHub"
+          >
+            v{packageJson.version}
+          </a>
+          {onRestart && (
+            <button
+              onClick={onRestart}
+              disabled={isRestarting}
+              className="p-1 rounded bg-zinc-900/90 border border-zinc-800/60 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="Restart backend server"
+            >
+              <RotateCw className={`w-3 h-3 ${isRestarting ? "animate-spin" : ""}`} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* New Chat Dialog */}

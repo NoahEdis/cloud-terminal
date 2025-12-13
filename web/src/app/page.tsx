@@ -2,7 +2,6 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
-import packageJson from "../../package.json";
 import {
   Terminal as TerminalIcon,
   MessageSquare,
@@ -23,7 +22,6 @@ import {
   Headphones,
   Copy,
   Check,
-  RotateCw,
   ChevronLeft,
 } from "lucide-react";
 import {
@@ -626,7 +624,7 @@ export default function Home() {
         {/* Mobile: Full-screen chat list */}
         {showMobileChatList && (
           <div className="flex-1 h-full overflow-hidden">
-            <ChatList selectedId={selectedSessionId} onSelect={handleSelectSession} />
+            <ChatList selectedId={selectedSessionId} onSelect={handleSelectSession} onRestart={handleRestart} isRestarting={isRestarting} />
           </div>
         )}
 
@@ -643,7 +641,7 @@ export default function Home() {
             } ${!sidebarOpen ? "border-r-0" : ""}`}
           >
             <div style={{ width: sidebarWidth }} className="h-full overflow-hidden">
-              <ChatList selectedId={selectedSessionId} onSelect={handleSelectSession} />
+              <ChatList selectedId={selectedSessionId} onSelect={handleSelectSession} onRestart={handleRestart} isRestarting={isRestarting} />
             </div>
           </div>
         )}
@@ -880,27 +878,6 @@ export default function Home() {
           }
         }}
       />
-
-      {/* Version indicator and restart button */}
-      <div className="fixed bottom-3 left-3 flex items-center gap-1.5 z-50">
-        <a
-          href="https://github.com/NoahEdis/cloud-terminal/commits/main"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="px-2 py-0.5 rounded bg-zinc-900/90 border border-zinc-800/60 text-[10px] text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 font-mono transition-colors"
-          title="View commits on GitHub"
-        >
-          v{packageJson.version}
-        </a>
-        <button
-          onClick={handleRestart}
-          disabled={isRestarting}
-          className="p-1 rounded bg-zinc-900/90 border border-zinc-800/60 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          title="Restart backend server"
-        >
-          <RotateCw className={`w-3 h-3 ${isRestarting ? "animate-spin" : ""}`} />
-        </button>
-      </div>
     </div>
   );
 }

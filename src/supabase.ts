@@ -1887,3 +1887,286 @@ export function insertSystemMessageAsync(
     // Silently ignore - messages are best-effort
   });
 }
+
+// ============================================================================
+// Sync Management
+// ============================================================================
+
+export type SyncStatus = "idle" | "syncing" | "error";
+export type SyncFreshness = "never" | "recent" | "today" | "this week" | "stale";
+export type SyncTrigger = "manual" | "cron" | "webhook";
+
+export interface SyncSource {
+  source: string;
+  description: string | null;
+  status: SyncStatus;
+  freshness: SyncFreshness;
+  last_sync_at: string | null;
+  last_full_sync_at: string | null;
+  total_items_synced: number;
+  error_message: string | null;
+  enabled: boolean;
+  schedule: string | null;
+  options: Record<string, unknown>;
+}
+
+export interface SyncRun {
+  id: string;
+  source: string;
+  started_at: string;
+  completed_at: string | null;
+  status: "running" | "success" | "error" | "cancelled";
+  items_processed: number;
+  items_created: number;
+  items_updated: number;
+  items_failed: number;
+  error_message: string | null;
+  triggered_by: SyncTrigger;
+  options: Record<string, unknown>;
+  duration_ms: number | null;
+}
+
+export interface SyncConfigUpdate {
+  enabled?: boolean;
+  schedule?: string | null;
+  options?: Record<string, unknown>;
+}
+
+/**
+ * Get all sync sources with status from the v_sync_sources view.
+ */
+export async function getSyncSources(): Promise<SyncSource[]> {
+  if (!isSupabaseEnabled()) return [];
+
+  try {
+    const sources = await supabaseRequest<SyncSource[]>("GET", "/v_sync_sources", {
+      headers: {
+        "Accept-Profile": "neo4j",
+      },
+      searchParams: {
+        order: "source.asc",
+      },
+    });
+    return sources;
+  } catch (error) {
+    console.error("[Supabase] Failed to get sync sources:", error);
+    return [];
+  }
+}
+
+/**
+ * Get a single sync source by name.
+ */
+export async function getSyncSourceByName(name: string): Promise<SyncSource | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    const sources = await supabaseRequest<SyncSource[]>("GET", "/v_sync_sources", {
+      headers: {
+        "Accept-Profile": "neo4j",
+      },
+      searchParams: {
+        source: `eq.${name}`,
+      },
+    });
+    return sources[0] || null;
+  } catch (error) {
+    console.error(`[Supabase] Failed to get sync source ${name}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Trigger a sync by creating a history record and calling the Edge Function.
+ */
+export async function triggerSync(
+  source: string,
+  options: Record<string, unknown> = {}
+): Promise<SyncRun> {
+  if (!isSupabaseEnabled()) {
+    throw new Error("Supabase not configured");
+  }
+
+  try {
+    // Create sync history record
+    const runs = await supabaseRequest<SyncRun[]>("POST", "/sync_history", {
+      headers: {
+        "Accept-Profile": "neo4j",
+        "Content-Profile": "neo4j",
+      },
+      body: {
+        source,
+        status: "running",
+        triggered_by: "manual",
+        options,
+      },
+    });
+
+    const run = runs[0];
+    if (!run) {
+      throw new Error("Failed to create sync run record");
+    }
+
+    // Update sync_state to syncing
+    await supabaseRequest("PATCH", "/sync_state", {
+      headers: {
+        "Accept-Profile": "neo4j",
+        "Content-Profile": "neo4j",
+      },
+      searchParams: { source: `eq.${source}` },
+      body: { sync_status: "syncing" },
+    });
+
+    // Call the Edge Function to start the sync (fire and forget)
+    const edgeFunctionUrl = `${SUPABASE_URL}/functions/v1/trigger_sync`;
+    fetch(edgeFunctionUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        source,
+        options,
+        run_id: run.id,
+      }),
+    }).catch((err) => {
+      console.error(`[Supabase] Failed to trigger sync Edge Function:`, err);
+    });
+
+    console.log(`[Supabase] Triggered sync for ${source}, run_id=${run.id}`);
+    return run;
+  } catch (error) {
+    console.error(`[Supabase] Failed to trigger sync for ${source}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Update sync configuration.
+ */
+export async function updateSyncConfig(
+  source: string,
+  updates: SyncConfigUpdate
+): Promise<SyncSource | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    // Upsert into sync_configurations
+    const body: Record<string, unknown> = { source };
+    if (updates.enabled !== undefined) body.enabled = updates.enabled;
+    if (updates.schedule !== undefined) body.schedule = updates.schedule;
+    if (updates.options !== undefined) body.options = updates.options;
+
+    await supabaseRequest("POST", "/sync_configurations", {
+      headers: {
+        "Accept-Profile": "neo4j",
+        "Content-Profile": "neo4j",
+        "Prefer": "resolution=merge-duplicates",
+      },
+      body,
+    });
+
+    // Return updated source
+    return getSyncSourceByName(source);
+  } catch (error) {
+    console.error(`[Supabase] Failed to update sync config for ${source}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Get sync history with optional filters.
+ */
+export async function getSyncHistory(filters: {
+  source?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<SyncRun[]> {
+  if (!isSupabaseEnabled()) return [];
+
+  try {
+    const searchParams: Record<string, string> = {
+      order: "started_at.desc",
+      limit: String(filters.limit || 50),
+      offset: String(filters.offset || 0),
+    };
+
+    if (filters.source) {
+      searchParams.source = `eq.${filters.source}`;
+    }
+
+    const runs = await supabaseRequest<SyncRun[]>("GET", "/sync_history", {
+      headers: {
+        "Accept-Profile": "neo4j",
+      },
+      searchParams,
+    });
+    return runs;
+  } catch (error) {
+    console.error("[Supabase] Failed to get sync history:", error);
+    return [];
+  }
+}
+
+/**
+ * Get a single sync run by ID.
+ */
+export async function getSyncRunById(id: string): Promise<SyncRun | null> {
+  if (!isSupabaseEnabled()) return null;
+
+  try {
+    const runs = await supabaseRequest<SyncRun[]>("GET", "/sync_history", {
+      headers: {
+        "Accept-Profile": "neo4j",
+      },
+      searchParams: {
+        id: `eq.${id}`,
+      },
+    });
+    return runs[0] || null;
+  } catch (error) {
+    console.error(`[Supabase] Failed to get sync run ${id}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Cancel a running sync.
+ */
+export async function cancelSyncRun(id: string): Promise<void> {
+  if (!isSupabaseEnabled()) return;
+
+  try {
+    // Update the run status to cancelled
+    await supabaseRequest("PATCH", "/sync_history", {
+      headers: {
+        "Accept-Profile": "neo4j",
+        "Content-Profile": "neo4j",
+      },
+      searchParams: { id: `eq.${id}` },
+      body: {
+        status: "cancelled",
+        completed_at: new Date().toISOString(),
+      },
+    });
+
+    // Get the source from the run to update sync_state
+    const run = await getSyncRunById(id);
+    if (run) {
+      await supabaseRequest("PATCH", "/sync_state", {
+        headers: {
+          "Accept-Profile": "neo4j",
+          "Content-Profile": "neo4j",
+        },
+        searchParams: { source: `eq.${run.source}` },
+        body: { sync_status: "idle" },
+      });
+    }
+
+    console.log(`[Supabase] Cancelled sync run ${id}`);
+  } catch (error) {
+    console.error(`[Supabase] Failed to cancel sync run ${id}:`, error);
+    throw error;
+  }
+}
