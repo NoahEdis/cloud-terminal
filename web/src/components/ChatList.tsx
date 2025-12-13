@@ -975,7 +975,7 @@ export default function ChatList({ selectedId, onSelect, onRestart, isRestarting
   return (
     <div className="h-full w-full flex flex-col bg-black">
       {/* Header */}
-      <div className="px-3 py-3 border-b border-zinc-800">
+      <div className="px-3 py-3 border-b border-zinc-800 pt-[max(12px,env(safe-area-inset-top))]">
         <div className="flex items-center justify-between mb-3">
           <span className="text-[13px] font-medium text-zinc-100">Chats</span>
           <div className="flex items-center gap-1">

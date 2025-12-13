@@ -455,7 +455,8 @@ export default function Home() {
 
   return (
     <div className="h-screen flex flex-col bg-black text-zinc-100 safe-area-inset">
-      {/* Header */}
+      {/* Header - hidden on mobile chat list since ChatList has its own header */}
+      {!showMobileChatList && (
       <header className="flex items-center justify-between h-11 px-3 border-b border-zinc-800 pt-[env(safe-area-inset-top)]">
         <div className="flex items-center gap-2 min-w-0 flex-1">
           {/* Mobile: Back button when viewing a session */}
@@ -618,6 +619,7 @@ export default function Home() {
           </div>
         )}
       </header>
+      )}
 
       {/* Main */}
       <div className="flex-1 flex overflow-hidden isolate">
