@@ -2368,18 +2368,39 @@ export function getCredentialApiDocsTemplate(credentialName: string, appName: st
 // ============================================================================
 // Sync Management API
 // ============================================================================
-// NOTE: These functions call Next.js API routes directly (not the Hono backend)
-// because the sync API needs to work on Vercel without the backend server.
+// Uses smart URL detection:
+// - Local/Tailscale: Uses Hono backend via getApiUrl()
+// - Vercel: Falls back to Next.js API routes if Hono backend unavailable
 
 import type { SyncSource, SyncRun, SyncSourceConfig } from "./sync-types";
+
+/**
+ * Get the sync API base URL.
+ * On Vercel (no NEXT_PUBLIC_TERMINAL_API_URL), uses Next.js API routes.
+ * Locally, uses the Hono backend.
+ */
+function getSyncApiUrl(): string {
+  // Check if we have a configured terminal API URL (local/Tailscale deployment)
+  const terminalApiUrl = typeof window !== "undefined"
+    ? (window as unknown as { ENV?: { NEXT_PUBLIC_TERMINAL_API_URL?: string } }).ENV?.NEXT_PUBLIC_TERMINAL_API_URL
+    : process.env.NEXT_PUBLIC_TERMINAL_API_URL;
+
+  if (terminalApiUrl) {
+    return terminalApiUrl.replace(/\/+$/, "");
+  }
+
+  // Fallback to Next.js API routes (Vercel deployment)
+  return "";
+}
 
 /**
  * Get all sync sources with status.
  */
 export async function getSyncSources(): Promise<SyncSource[]> {
   try {
-    const res = await fetch("/api/sync/sources", {
-      headers: { "Content-Type": "application/json" },
+    const baseUrl = getSyncApiUrl();
+    const res = await fetch(`${baseUrl}/api/sync/sources`, {
+      headers: headers(),
       signal: AbortSignal.timeout(10000),
     });
 
@@ -2400,8 +2421,9 @@ export async function getSyncSources(): Promise<SyncSource[]> {
  */
 export async function getSyncSource(name: string): Promise<SyncSource | null> {
   try {
-    const res = await fetch(`/api/sync/sources/${encodeURIComponent(name)}`, {
-      headers: { "Content-Type": "application/json" },
+    const baseUrl = getSyncApiUrl();
+    const res = await fetch(`${baseUrl}/api/sync/sources/${encodeURIComponent(name)}`, {
+      headers: headers(),
       signal: AbortSignal.timeout(10000),
     });
 
@@ -2429,9 +2451,10 @@ export async function triggerSync(
   options?: Record<string, unknown>
 ): Promise<SyncRun> {
   try {
-    const res = await fetch(`/api/sync/sources/${encodeURIComponent(name)}/trigger`, {
+    const baseUrl = getSyncApiUrl();
+    const res = await fetch(`${baseUrl}/api/sync/sources/${encodeURIComponent(name)}/trigger`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: headers(),
       body: JSON.stringify({ options }),
       signal: AbortSignal.timeout(15000),
     });
@@ -2460,9 +2483,10 @@ export async function updateSyncConfig(
   config: SyncSourceConfig
 ): Promise<SyncSource> {
   try {
-    const res = await fetch(`/api/sync/sources/${encodeURIComponent(name)}`, {
+    const baseUrl = getSyncApiUrl();
+    const res = await fetch(`${baseUrl}/api/sync/sources/${encodeURIComponent(name)}/config`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: headers(),
       body: JSON.stringify(config),
       signal: AbortSignal.timeout(10000),
     });
@@ -2494,8 +2518,9 @@ export async function getSyncHistory(filters?: {
     if (filters?.offset) params.set("offset", String(filters.offset));
 
     const query = params.toString() ? `?${params}` : "";
-    const res = await fetch(`/api/sync/history${query}`, {
-      headers: { "Content-Type": "application/json" },
+    const baseUrl = getSyncApiUrl();
+    const res = await fetch(`${baseUrl}/api/sync/history${query}`, {
+      headers: headers(),
       signal: AbortSignal.timeout(10000),
     });
 
@@ -2516,8 +2541,9 @@ export async function getSyncHistory(filters?: {
  */
 export async function getSyncRun(id: string): Promise<SyncRun | null> {
   try {
-    const res = await fetch(`/api/sync/history/${encodeURIComponent(id)}`, {
-      headers: { "Content-Type": "application/json" },
+    const baseUrl = getSyncApiUrl();
+    const res = await fetch(`${baseUrl}/api/sync/history/${encodeURIComponent(id)}`, {
+      headers: headers(),
       signal: AbortSignal.timeout(10000),
     });
 
@@ -2542,9 +2568,10 @@ export async function getSyncRun(id: string): Promise<SyncRun | null> {
  */
 export async function cancelSync(runId: string): Promise<void> {
   try {
-    const res = await fetch(`/api/sync/history/${encodeURIComponent(runId)}/cancel`, {
+    const baseUrl = getSyncApiUrl();
+    const res = await fetch(`${baseUrl}/api/sync/history/${encodeURIComponent(runId)}/cancel`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: headers(),
       signal: AbortSignal.timeout(10000),
     });
 
