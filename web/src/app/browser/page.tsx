@@ -119,44 +119,50 @@ export default function BrowserPage() {
   // WebSocket connection
   useEffect(() => {
     const connectWebSocket = () => {
-      const wsUrl = getBrowserAgentWSUrl();
-      console.log("[Browser] Connecting to WebSocket:", wsUrl);
+      try {
+        const wsUrl = getBrowserAgentWSUrl();
+        console.log("[Browser] Connecting to WebSocket:", wsUrl);
 
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
 
-      ws.onopen = () => {
-        console.log("[Browser] WebSocket connected");
-        setWsConnected(true);
-        setConnectionStatus("connected");
-        setError(null);
-      };
+        ws.onopen = () => {
+          console.log("[Browser] WebSocket connected");
+          setWsConnected(true);
+          setConnectionStatus("connected");
+          setError(null);
+        };
 
-      ws.onclose = () => {
-        console.log("[Browser] WebSocket disconnected");
-        setWsConnected(false);
-        wsRef.current = null;
+        ws.onclose = () => {
+          console.log("[Browser] WebSocket disconnected");
+          setWsConnected(false);
+          wsRef.current = null;
 
-        // Attempt to reconnect after 3 seconds
-        reconnectTimeoutRef.current = setTimeout(() => {
-          if (!wsRef.current) {
-            connectWebSocket();
+          // Attempt to reconnect after 3 seconds
+          reconnectTimeoutRef.current = setTimeout(() => {
+            if (!wsRef.current) {
+              connectWebSocket();
+            }
+          }, 3000);
+        };
+
+        ws.onerror = (event) => {
+          console.error("[Browser] WebSocket error:", event);
+          setConnectionStatus("disconnected");
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data) as BrowserWSEvent;
+            handleWebSocketMessage(message);
+          } catch (err) {
+            console.error("[Browser] Failed to parse WebSocket message:", err);
           }
-        }, 3000);
-      };
-
-      ws.onerror = (event) => {
-        console.error("[Browser] WebSocket error:", event);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data) as BrowserWSEvent;
-          handleWebSocketMessage(message);
-        } catch (err) {
-          console.error("[Browser] Failed to parse WebSocket message:", err);
-        }
-      };
+        };
+      } catch (err) {
+        console.error("[Browser] Failed to create WebSocket:", err);
+        setConnectionStatus("disconnected");
+      }
     };
 
     connectWebSocket();
