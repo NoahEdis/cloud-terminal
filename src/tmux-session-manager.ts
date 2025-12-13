@@ -477,7 +477,8 @@ export class TmuxSessionManager {
     cols?: number;
     rows?: number;
     autoRunCommand?: string;
-    chatType?: "claude" | "custom";
+    chatType?: "claude" | "codex" | "custom";
+    projectContext?: string; // Optional project context to inject via /context add
   }): Promise<TmuxManagedSession> {
     const name = config.name || `${CLOUD_SESSION_PREFIX}${Date.now()}`;
     const cwd = config.cwd || process.env.HOME || "/";
@@ -568,10 +569,54 @@ export class TmuxSessionManager {
           `**Claude Code** session started\n\nWorking directory: \`${cwd}\``,
           { metadata: { chatType: config.chatType || "claude", autoRunCommand: config.autoRunCommand } }
         ).catch(err => console.error("[TmuxSessionManager] Failed to insert startup message:", err));
+
+        // If projectContext is provided, inject it after Claude Code starts
+        if (config.projectContext) {
+          // Schedule context injection - runs asynchronously to not block session creation
+          this.injectProjectContext(name, config.projectContext).catch(err => {
+            console.error(`[TmuxSessionManager] Failed to inject project context:`, err);
+          });
+        }
       }
     }
 
     return session;
+  }
+
+  /**
+   * Inject project context into a Claude Code session using /context add.
+   * Writes context to a temp file and sends the /context add command.
+   */
+  private async injectProjectContext(sessionName: string, context: string): Promise<void> {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+
+    // Create temp directory for context files
+    const contextDir = "/tmp/cloud-terminal-context";
+    await fs.mkdir(contextDir, { recursive: true });
+
+    // Write context to temp file with session name
+    const safeSessionName = sessionName.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const contextPath = path.join(contextDir, `${safeSessionName}-context.md`);
+    await fs.writeFile(contextPath, context, "utf-8");
+
+    console.log(`[TmuxSessionManager] Wrote context to ${contextPath} (${context.length} bytes)`);
+
+    // Wait for Claude Code to initialize (it takes a few seconds to start)
+    // We wait 5 seconds to give Claude time to fully start up
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // Check if session still exists
+    const session = this.sessions.get(sessionName);
+    if (!session || session.status !== "running") {
+      console.log(`[TmuxSessionManager] Session ${sessionName} no longer running, skipping context injection`);
+      return;
+    }
+
+    // Send the /context add command
+    const contextCommand = `/context add ${contextPath}`;
+    tmux.sendKeys(sessionName, contextCommand + "\n", true);
+    console.log(`[TmuxSessionManager] Injected context into ${sessionName}: ${contextCommand}`);
   }
 
   /**

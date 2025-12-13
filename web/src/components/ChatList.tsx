@@ -68,6 +68,7 @@ import {
   createContextFile,
   getGitHubPat,
   syncFoldersFromGitHub,
+  getContextFile,
   type ArchivedSession,
 } from "@/lib/api";
 import type { SessionInfo, SessionConfig, ActivityState, SessionMetrics, ChatType } from "@/lib/types";
@@ -331,16 +332,32 @@ export default function ChatList({ selectedId, onSelect }: ChatListProps) {
         autoRunCommand = codexFullAuto ? "codex --full-auto" : "codex";
       }
 
-      // Create session with optional auto-run command
+      // Check if folder has project context (for Claude Code sessions)
+      let projectContext: string | undefined;
+      const folderToAssign = newSessionFolder && newSessionFolder !== "__none__" ? newSessionFolder : "";
+      if (folderToAssign && newChatType === "claude" && getGitHubPat()) {
+        try {
+          const contextFile = await getContextFile(folderToAssign);
+          if (contextFile.exists && contextFile.content.trim()) {
+            projectContext = contextFile.content;
+            console.log(`[ChatList] Loaded context for folder "${folderToAssign}" (${projectContext.length} bytes)`);
+          }
+        } catch (err) {
+          // Don't fail session creation if context fetch fails
+          console.warn(`[ChatList] Failed to fetch context for folder "${folderToAssign}":`, err);
+        }
+      }
+
+      // Create session with optional auto-run command and project context
       const session = await createSession({
         ...newSessionConfig,
         autoRunCommand,
         chatType: newChatType,
+        projectContext,
       });
       const sessionId = getSessionId(session);
       setSessions((prev) => [...prev, session]);
-      // Handle folder assignment (empty string or "__none__" means no folder)
-      const folderToAssign = newSessionFolder && newSessionFolder !== "__none__" ? newSessionFolder : "";
+      // Handle folder assignment
       if (folderToAssign) {
         setSessionFolder(sessionId, folderToAssign);
         setSessionFoldersState(getSessionFolders());

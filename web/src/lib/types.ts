@@ -70,6 +70,8 @@ export interface ChatConfig {
   chatType?: ChatType;
   // Command to auto-run after chat creation (e.g., claude --dangerously-skip-permissions)
   autoRunCommand?: string;
+  // Project context to inject into Claude Code sessions via /context add
+  projectContext?: string;
 }
 
 // Legacy aliases for backward compatibility during migration

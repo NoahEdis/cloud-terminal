@@ -24,7 +24,8 @@ tmuxApi.post("/sessions", async (c) => {
     cols?: number;
     rows?: number;
     autoRunCommand?: string;
-    chatType?: "claude" | "custom";
+    chatType?: "claude" | "codex" | "custom";
+    projectContext?: string; // Optional project context to inject via /context add
   }>();
 
   // Coerce string numbers to actual numbers (n8n sends strings)
@@ -35,6 +36,7 @@ tmuxApi.post("/sessions", async (c) => {
     rows: body.rows ? Number(body.rows) : undefined,
     autoRunCommand: body.autoRunCommand,
     chatType: body.chatType,
+    projectContext: body.projectContext,
   };
 
   try {
