@@ -795,7 +795,7 @@ body {
 /* Mobile input bar bottom padding - accounts for home indicator */
 @media (max-width: 768px) {
   .mobile-input-padding {
-    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0)) !important;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0)) !important;
   }
 }
 

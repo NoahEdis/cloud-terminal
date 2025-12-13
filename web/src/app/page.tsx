@@ -784,7 +784,7 @@ export default function Home() {
               />
 
               {/* Input container - rounded rectangle that maintains shape when expanded */}
-              <div className="flex items-center gap-3 bg-[#303030] border border-[#313131] rounded-3xl px-3 py-3 shadow-[0_0_0_1px_rgba(58,58,58,0.55)] focus-within:border-[#454545] transition-colors">
+              <div className="flex items-center gap-3 bg-[#303030] border border-[#313131] rounded-full px-3 py-3 shadow-[0_0_0_1px_rgba(58,58,58,0.55)] focus-within:border-[#454545] transition-colors">
                 {/* Plus button (media upload) - transparent, large hit area */}
                 <button
                   type="button"
