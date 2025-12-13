@@ -763,7 +763,7 @@ body {
 }
 
 .safe-area-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));
 }
 
 .safe-area-left {
@@ -774,9 +774,11 @@ body {
   padding-right: env(safe-area-inset-right, 0);
 }
 
-/* Ensure body respects safe areas */
-html, body {
-  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+/* Mobile input bar bottom padding */
+@media (max-width: 768px) {
+  .mobile-input-padding {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0)) !important;
+  }
 }
 
 /* Mobile-specific optimizations */

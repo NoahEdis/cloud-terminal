@@ -708,7 +708,7 @@ export default function Home() {
 
           {/* Input bar - hidden in graph and canvas modes */}
           {viewMode !== "graph" && viewMode !== "canvas" && (
-          <div className="border-t border-zinc-800 p-2.5 bg-zinc-950 safe-area-bottom">
+          <div className="border-t border-zinc-800 p-2.5 pb-4 bg-zinc-950 safe-area-bottom mobile-input-padding">
             {error && (
               <div className="mb-2 px-2.5 py-1.5 text-[12px] text-red-400 bg-red-950/50 rounded flex items-center justify-between">
                 <span>{error}</span>
