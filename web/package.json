@@ -9,6 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/ios": "^8.0.0",
     "@elevenlabs/client": "^0.12.0",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-context-menu": "^2.2.16",
@@ -28,7 +30,7 @@
     "d3": "^7.9.0",
     "d3-force": "^3.0.0",
     "lucide-react": "^0.555.0",
-    "next": "16.0.7",
+    "next": "^16.0.10",
     "next-auth": "^5.0.0-beta.30",
     "react": "19.2.0",
     "react-dom": "19.2.0",
@@ -38,7 +40,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.0.0",
-    "@tailwindcss/postcss": "^4.1.18",
+    "@tailwindcss/postcss": "4.1.18",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

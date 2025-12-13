@@ -10,6 +10,18 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Cloud Terminal",
   description: "Remote terminal management interface",
+  viewport: {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1,
+    userScalable: false,
+    viewportFit: "cover",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Cloud Terminal",
+  },
 };
 
 export default function RootLayout({

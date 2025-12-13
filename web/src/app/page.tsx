@@ -2,7 +2,6 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import packageJson from "../../package.json";
 import {
   Terminal as TerminalIcon,
@@ -25,6 +24,7 @@ import {
   Copy,
   Check,
   RotateCw,
+  ChevronLeft,
 } from "lucide-react";
 import {
   listSessions,
@@ -82,12 +82,23 @@ export default function Home() {
   const [windowInfo, setWindowInfo] = useState<WindowInfoResponse | null>(null);
   const [copiedSessionId, setCopiedSessionId] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const sidebarRef = useRef<HTMLDivElement>(null);
+
+  // Detect mobile viewport
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   // Auto-resize textarea up to max height
   const adjustTextareaHeight = useCallback(() => {
@@ -129,8 +140,9 @@ export default function Home() {
         const data = await listSessions();
         setSessions(data);
 
-        // Auto-select first session if none selected
-        if (data.length > 0 && !selectedSessionId) {
+        // Auto-select first session if none selected (desktop only)
+        // On mobile, we show the chat list first
+        if (data.length > 0 && !selectedSessionId && !isMobile) {
           setSelectedSessionId(getSessionId(data[0]));
         }
 
@@ -139,7 +151,7 @@ export default function Home() {
           const sessionExists = data.some(s => getSessionId(s) === selectedSessionId);
           if (!sessionExists) {
             // Selected session was killed, select first available or clear
-            setSelectedSessionId(getSessionId(data[0]));
+            setSelectedSessionId(isMobile ? null : getSessionId(data[0]));
           }
         }
 
@@ -154,7 +166,12 @@ export default function Home() {
     loadSessions();
     const interval = setInterval(loadSessions, 5000);
     return () => clearInterval(interval);
-  }, [selectedSessionId]);
+  }, [selectedSessionId, isMobile]);
+
+  // Handle back navigation on mobile
+  const handleMobileBack = useCallback(() => {
+    setSelectedSessionId(null);
+  }, []);
 
   // Fetch message count for the selected session
   useEffect(() => {
@@ -434,28 +451,52 @@ export default function Home() {
 
   const currentSession = sessions.find(s => getSessionId(s) === selectedSessionId);
 
+  // On mobile, show chat list when no session selected
+  const showMobileChatList = isMobile && !selectedSessionId;
+  const showMobileDetail = isMobile && selectedSessionId;
+
   return (
     <div className="h-screen flex flex-col bg-black text-zinc-100">
       {/* Header */}
-      <header className="flex items-center justify-between h-11 px-3 border-b border-zinc-800">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-1.5 -ml-1.5 rounded hover:bg-zinc-800 transition-colors"
-          >
-            {sidebarOpen ? (
-              <PanelLeftClose className="w-4 h-4 text-zinc-400" />
-            ) : (
-              <PanelLeft className="w-4 h-4 text-zinc-400" />
-            )}
-          </button>
+      <header className="flex items-center justify-between h-11 px-3 border-b border-zinc-800 safe-area-top">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          {/* Mobile: Back button when viewing a session */}
+          {showMobileDetail ? (
+            <button
+              onClick={handleMobileBack}
+              className="p-1.5 -ml-1.5 rounded hover:bg-zinc-800 transition-colors flex items-center gap-1"
+            >
+              <ChevronLeft className="w-5 h-5 text-zinc-400" />
+              <span className="text-[13px] text-zinc-400">Chats</span>
+            </button>
+          ) : !isMobile ? (
+            /* Desktop: Sidebar toggle */
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-1.5 -ml-1.5 rounded hover:bg-zinc-800 transition-colors"
+            >
+              {sidebarOpen ? (
+                <PanelLeftClose className="w-4 h-4 text-zinc-400" />
+              ) : (
+                <PanelLeft className="w-4 h-4 text-zinc-400" />
+              )}
+            </button>
+          ) : null}
 
-          <span className="text-[13px] font-medium text-zinc-100">
-            {viewMode === "terminal" ? "Terminal" : viewMode === "messages" ? "Messages" : viewMode === "graph" ? "Knowledge Graph" : "Canvas"}
-          </span>
+          {/* Title - hidden on mobile chat list view */}
+          {!showMobileChatList && (
+            <span className="text-[13px] font-medium text-zinc-100 truncate">
+              {viewMode === "terminal" ? "Terminal" : viewMode === "messages" ? "Messages" : viewMode === "graph" ? "Knowledge Graph" : "Canvas"}
+            </span>
+          )}
 
-          {/* Session ID badge with live indicator and copy button */}
-          {selectedSessionId && (
+          {/* Mobile chat list title */}
+          {showMobileChatList && (
+            <span className="text-[15px] font-semibold text-zinc-100">Chats</span>
+          )}
+
+          {/* Session ID badge - hidden on mobile */}
+          {selectedSessionId && !isMobile && (
             <>
               <span className="text-zinc-600">/</span>
               <button
@@ -503,87 +544,112 @@ export default function Home() {
             </>
           )}
 
+          {/* Mobile: Live indicator only */}
+          {showMobileDetail && currentSession && (
+            <div
+              className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                currentSession.activityState === "busy"
+                  ? "bg-amber-500 animate-pulse"
+                  : currentSession.activityState === "idle"
+                  ? "bg-emerald-500"
+                  : "bg-zinc-600"
+              }`}
+            />
+          )}
+
           {/* Connection status indicator */}
           {connectionStatus === "disconnected" && (
             <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-red-950/50 border border-red-900/50">
               <WifiOff className="w-3 h-3 text-red-400" />
-              <span className="text-[11px] text-red-400">Server offline</span>
+              <span className="text-[11px] text-red-400 hidden sm:inline">Server offline</span>
             </div>
           )}
           {connectionStatus === "connecting" && (
             <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-amber-950/50 border border-amber-900/50">
               <Loader2 className="w-3 h-3 text-amber-400 animate-spin" />
-              <span className="text-[11px] text-amber-400">Reconnecting...</span>
+              <span className="text-[11px] text-amber-400 hidden sm:inline">Reconnecting...</span>
             </div>
           )}
         </div>
 
-        {/* View switcher */}
-        <div className="flex items-center h-7 rounded-md border border-zinc-800 overflow-hidden">
-          <button
-            onClick={() => setViewMode("terminal")}
-            className={`flex items-center gap-1.5 px-2.5 h-full text-[12px] transition-colors ${
-              viewMode === "terminal" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            <TerminalIcon className="w-3 h-3" />
-            <span className="hidden sm:inline">Terminal</span>
-          </button>
-          <button
-            onClick={() => setViewMode("messages")}
-            className={`flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors ${
-              viewMode === "messages" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            <MessageSquare className="w-3 h-3" />
-            <span className="hidden sm:inline">Messages</span>
-            {messageCount > 0 && (
-              <span className="ml-0.5 px-1.5 py-0.5 min-w-[18px] text-center text-[10px] font-medium bg-zinc-700 text-zinc-200 rounded-full">
-                {messageCount > 99 ? "99+" : messageCount}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setViewMode("graph")}
-            className={`flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors ${
-              viewMode === "graph" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            <Network className="w-3 h-3" />
-            <span className="hidden sm:inline">Graph</span>
-          </button>
-          <button
-            onClick={() => setViewMode("canvas")}
-            className={`flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors ${
-              viewMode === "canvas" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            <Layers className="w-3 h-3" />
-            <span className="hidden sm:inline">Canvas</span>
-          </button>
-        </div>
+        {/* View switcher - hidden on mobile chat list, simplified on mobile detail */}
+        {!showMobileChatList && (
+          <div className="flex items-center h-7 rounded-md border border-zinc-800 overflow-hidden flex-shrink-0">
+            <button
+              onClick={() => setViewMode("terminal")}
+              className={`flex items-center gap-1.5 px-2.5 h-full text-[12px] transition-colors ${
+                viewMode === "terminal" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              <TerminalIcon className="w-3 h-3" />
+              <span className="hidden sm:inline">Terminal</span>
+            </button>
+            <button
+              onClick={() => setViewMode("messages")}
+              className={`flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors ${
+                viewMode === "messages" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              <MessageSquare className="w-3 h-3" />
+              <span className="hidden sm:inline">Messages</span>
+              {messageCount > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.5 min-w-[18px] text-center text-[10px] font-medium bg-zinc-700 text-zinc-200 rounded-full">
+                  {messageCount > 99 ? "99+" : messageCount}
+                </span>
+              )}
+            </button>
+            {/* Hide graph and canvas on mobile */}
+            <button
+              onClick={() => setViewMode("graph")}
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors ${
+                viewMode === "graph" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              <Network className="w-3 h-3" />
+              <span className="hidden sm:inline">Graph</span>
+            </button>
+            <button
+              onClick={() => setViewMode("canvas")}
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 h-full text-[12px] border-l border-zinc-800 transition-colors ${
+                viewMode === "canvas" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              <Layers className="w-3 h-3" />
+              <span className="hidden sm:inline">Canvas</span>
+            </button>
+          </div>
+        )}
       </header>
 
       {/* Main */}
       <div className="flex-1 flex overflow-hidden isolate">
-        {/* Sidebar - isolated stacking context with minWidth to prevent collapse */}
-        <div
-          ref={sidebarRef}
-          style={{
-            width: sidebarOpen ? sidebarWidth : 0,
-            minWidth: sidebarOpen ? sidebarWidth : 0
-          }}
-          className={`isolate z-20 flex-shrink-0 border-r border-zinc-800 bg-black overflow-hidden ${
-            isResizing ? "" : "transition-all duration-200"
-          } ${!sidebarOpen ? "border-r-0" : ""}`}
-        >
-          <div style={{ width: sidebarWidth }} className="h-full overflow-hidden">
+        {/* Mobile: Full-screen chat list */}
+        {showMobileChatList && (
+          <div className="flex-1 h-full overflow-hidden">
             <ChatList selectedId={selectedSessionId} onSelect={handleSelectSession} />
           </div>
-        </div>
+        )}
 
-        {/* Resize handle */}
-        {sidebarOpen && (
+        {/* Desktop: Sidebar - isolated stacking context with minWidth to prevent collapse */}
+        {!isMobile && (
+          <div
+            ref={sidebarRef}
+            style={{
+              width: sidebarOpen ? sidebarWidth : 0,
+              minWidth: sidebarOpen ? sidebarWidth : 0
+            }}
+            className={`isolate z-20 flex-shrink-0 border-r border-zinc-800 bg-black overflow-hidden ${
+              isResizing ? "" : "transition-all duration-200"
+            } ${!sidebarOpen ? "border-r-0" : ""}`}
+          >
+            <div style={{ width: sidebarWidth }} className="h-full overflow-hidden">
+              <ChatList selectedId={selectedSessionId} onSelect={handleSelectSession} />
+            </div>
+          </div>
+        )}
+
+        {/* Desktop: Resize handle */}
+        {!isMobile && sidebarOpen && (
           <div
             onMouseDown={handleMouseDown}
             className={`z-30 w-1 hover:w-1.5 bg-transparent hover:bg-zinc-700 cursor-col-resize flex-shrink-0 transition-all ${
@@ -593,6 +659,8 @@ export default function Home() {
         )}
 
         {/* Content - isolated stacking context, clips all children */}
+        {/* Hidden on mobile when showing chat list */}
+        {!showMobileChatList && (
         <div className="isolate z-10 flex-1 flex flex-col min-w-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-hidden">
             {viewMode === "terminal" ? (
@@ -642,7 +710,7 @@ export default function Home() {
 
           {/* Input bar - hidden in graph and canvas modes */}
           {viewMode !== "graph" && viewMode !== "canvas" && (
-          <div className="border-t border-zinc-800 p-2.5 bg-zinc-950">
+          <div className="border-t border-zinc-800 p-2.5 bg-zinc-950 safe-area-bottom">
             {error && (
               <div className="mb-2 px-2.5 py-1.5 text-[12px] text-red-400 bg-red-950/50 rounded flex items-center justify-between">
                 <span>{error}</span>
@@ -797,6 +865,7 @@ export default function Home() {
           </div>
           )}
         </div>
+        )}
       </div>
 
       {/* Voice Chat Dialog */}
@@ -814,13 +883,15 @@ export default function Home() {
 
       {/* Version indicator and restart button */}
       <div className="fixed bottom-3 left-3 flex items-center gap-1.5 z-50">
-        <Link
-          href="/changelog"
+        <a
+          href="https://github.com/NoahEdis/cloud-terminal/commits/main"
+          target="_blank"
+          rel="noopener noreferrer"
           className="px-2 py-0.5 rounded bg-zinc-900/90 border border-zinc-800/60 text-[10px] text-zinc-500 hover:text-zinc-300 hover:border-zinc-600 font-mono transition-colors"
-          title="View changelog"
+          title="View commits on GitHub"
         >
           v{packageJson.version}
-        </Link>
+        </a>
         <button
           onClick={handleRestart}
           disabled={isRestarting}

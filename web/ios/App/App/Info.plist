@@ -47,9 +47,5 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
-	<key>NSHealthShareUsageDescription</key>
-	<string>Cloud Terminal needs access to read your health data to sync with your personal dashboard.</string>
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>Cloud Terminal needs access to write health data to log activities and metrics.</string>
 </dict>
 </plist>
