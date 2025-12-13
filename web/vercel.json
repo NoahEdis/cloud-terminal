@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npm install && TURBOPACK=0 npm run build",
+  "buildCommand": "TURBOPACK=0 next build",
   "outputDirectory": ".next",
   "installCommand": "npm install"
 }
