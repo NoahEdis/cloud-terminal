@@ -75,9 +75,13 @@ export function createTmuxTerminalServer(config: ServerConfig = {}) {
     });
   });
 
-  // Auth middleware for API routes (except /api/hook)
+  // Auth middleware for API routes (except public routes)
+  const PUBLIC_API_ROUTES = ["/api/hook", "/api/sync"];
   app.use("/api/*", async (c, next) => {
-    if (c.req.path === "/api/hook") {
+    const isPublic = PUBLIC_API_ROUTES.some(
+      (route) => c.req.path === route || c.req.path.startsWith(route + "/")
+    );
+    if (isPublic) {
       return next();
     }
     return authMiddleware(c, next);
