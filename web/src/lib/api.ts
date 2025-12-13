@@ -2368,6 +2368,8 @@ export function getCredentialApiDocsTemplate(credentialName: string, appName: st
 // ============================================================================
 // Sync Management API
 // ============================================================================
+// NOTE: These functions call Next.js API routes directly (not the Hono backend)
+// because the sync API needs to work on Vercel without the backend server.
 
 import type { SyncSource, SyncRun, SyncSourceConfig } from "./sync-types";
 
@@ -2376,13 +2378,14 @@ import type { SyncSource, SyncRun, SyncSourceConfig } from "./sync-types";
  */
 export async function getSyncSources(): Promise<SyncSource[]> {
   try {
-    const res = await fetch(`${getApiUrl()}/api/sync/sources`, {
-      headers: headers(),
+    const res = await fetch("/api/sync/sources", {
+      headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(10000),
     });
 
     if (!res.ok) {
-      throw new Error(`Failed to fetch sync sources: ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Failed to fetch sync sources: ${res.status}`);
     }
 
     return res.json();
@@ -2397,8 +2400,8 @@ export async function getSyncSources(): Promise<SyncSource[]> {
  */
 export async function getSyncSource(name: string): Promise<SyncSource | null> {
   try {
-    const res = await fetch(`${getApiUrl()}/api/sync/sources/${encodeURIComponent(name)}`, {
-      headers: headers(),
+    const res = await fetch(`/api/sync/sources/${encodeURIComponent(name)}`, {
+      headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(10000),
     });
 
@@ -2407,7 +2410,8 @@ export async function getSyncSource(name: string): Promise<SyncSource | null> {
     }
 
     if (!res.ok) {
-      throw new Error(`Failed to fetch sync source: ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Failed to fetch sync source: ${res.status}`);
     }
 
     return res.json();
@@ -2425,9 +2429,9 @@ export async function triggerSync(
   options?: Record<string, unknown>
 ): Promise<SyncRun> {
   try {
-    const res = await fetch(`${getApiUrl()}/api/sync/sources/${encodeURIComponent(name)}/trigger`, {
+    const res = await fetch(`/api/sync/sources/${encodeURIComponent(name)}/trigger`, {
       method: "POST",
-      headers: headers(),
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ options }),
       signal: AbortSignal.timeout(15000),
     });
@@ -2456,9 +2460,9 @@ export async function updateSyncConfig(
   config: SyncSourceConfig
 ): Promise<SyncSource> {
   try {
-    const res = await fetch(`${getApiUrl()}/api/sync/sources/${encodeURIComponent(name)}/config`, {
+    const res = await fetch(`/api/sync/sources/${encodeURIComponent(name)}`, {
       method: "PATCH",
-      headers: headers(),
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(config),
       signal: AbortSignal.timeout(10000),
     });
@@ -2490,13 +2494,14 @@ export async function getSyncHistory(filters?: {
     if (filters?.offset) params.set("offset", String(filters.offset));
 
     const query = params.toString() ? `?${params}` : "";
-    const res = await fetch(`${getApiUrl()}/api/sync/history${query}`, {
-      headers: headers(),
+    const res = await fetch(`/api/sync/history${query}`, {
+      headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(10000),
     });
 
     if (!res.ok) {
-      throw new Error(`Failed to fetch sync history: ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Failed to fetch sync history: ${res.status}`);
     }
 
     return res.json();
@@ -2511,8 +2516,8 @@ export async function getSyncHistory(filters?: {
  */
 export async function getSyncRun(id: string): Promise<SyncRun | null> {
   try {
-    const res = await fetch(`${getApiUrl()}/api/sync/history/${encodeURIComponent(id)}`, {
-      headers: headers(),
+    const res = await fetch(`/api/sync/history/${encodeURIComponent(id)}`, {
+      headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(10000),
     });
 
@@ -2521,7 +2526,8 @@ export async function getSyncRun(id: string): Promise<SyncRun | null> {
     }
 
     if (!res.ok) {
-      throw new Error(`Failed to fetch sync run: ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Failed to fetch sync run: ${res.status}`);
     }
 
     return res.json();
@@ -2536,9 +2542,9 @@ export async function getSyncRun(id: string): Promise<SyncRun | null> {
  */
 export async function cancelSync(runId: string): Promise<void> {
   try {
-    const res = await fetch(`${getApiUrl()}/api/sync/history/${encodeURIComponent(runId)}/cancel`, {
+    const res = await fetch(`/api/sync/history/${encodeURIComponent(runId)}/cancel`, {
       method: "POST",
-      headers: headers(),
+      headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(10000),
     });
 
